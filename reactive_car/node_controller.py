@@ -8,15 +8,14 @@ from casadi import MX, DM, SX
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
-from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion, Vector3
 from ackermann_msgs.msg import AckermannDrive
 from mocap4r2_msgs.msg import RigidBodies
 from misc_scripts.n_ode import N_ODE
-from typing import Tuple
+from typing import Tuple, List
 
 
-class OdomToAckermann(Node):
+class NeuralODEController(Node):
     def __init__(self) -> None:
         super().__init__('Neural_ODE_Controller')
         self.vicon_subscriber: Subscription = self.create_subscription(RigidBodies, '/odom_topic', self.odom_callback, 10)
@@ -29,7 +28,13 @@ class OdomToAckermann(Node):
         self.model.eval()
 
         # car parameters
-        self.L = 1.0
+        self.L: float = 1.0
+
+        # control barrier function parameters
+        self.a: float = 3.5
+        self.b: float = 2.5
+        self.gamma: float = 1.0
+        self.ellipse_center: Tuple[float, float] = (0.5, 0.0)
 
     def odom_callback(self, msg: RigidBodies):
         # extract orientation and position from the VICON ROS2 message
@@ -77,14 +82,14 @@ class OdomToAckermann(Node):
 
         v: MX = casadi.MX.sym('v')
         delta: MX = casadi.MX.sym('delta')
-        delta_upper_bound: float = math.pi / 4  # 45 degrees
-        delta_lower_bound: float = -math.pi / 4
+        delta_upper_bound: float = casadi.pi / 4  # 45 degrees
+        delta_lower_bound: float = -casadi.pi / 4
 
-        cost = v**2 + delta**2 + gamma*epsilon
+        cost: MX = v**2 + delta**2 + gamma*epsilon
 
-        constraints = []
-        constraint_lower_bound = []
-        constraint_upper_bound = []
+        constraints: List[MX] = []
+        constraint_lower_bound: List[float] = []
+        constraint_upper_bound: List[float] = []
 
         constraints.append(delta)
         constraint_lower_bound.append(delta_lower_bound)
@@ -94,17 +99,31 @@ class OdomToAckermann(Node):
         
         return v, delta
     
-    def control_boundary_function(self, state: np.ndarray[np.float32]):
-        # B(x)
-        pass
-    
+    def control_boundary_function(self, state: np.ndarray[np.float32]) -> np.ndarray[np.float32]:
+        # defines the control barrier function for an elliptical boundary around the track
+        b_x: np.ndarray[np.float32] = 1 - np.array([[
+            ((state[0] - self.ellipse_center[0]) / self.a)**2,
+            ((state[1] - self.ellipse_center[1]) / self.b)**2]])
+        return b_x
+
+    def control_boundary_function_gradient(self, state: np.ndarray[np.float32]) -> casadi.DM:
+        # defines the gradient for an elliptical boundary around the track
+        db_dx: casadi.DM = casadi.DM(2, 1)
+        db_dx[0] = -2 * (state[0] - self.ellipse_center[0]) / (self.a**2)
+        db_dx[1] = -2 * (state[1] - self.ellipse_center[1]) / (self.b**2)
+        return db_dx
+
     def control_lyapunov_function(self, state: np.ndarray[np.float32]):
         # V(x)
         pass
 
+    def control_lyapunov_function_gradient(self, state: np.ndarray[np.float32]):
+        # V'(x)
+        pass
+
 def main(args=None):
     rclpy.init(args=args)
-    node = OdomToAckermann()
+    node = NeuralODEController()
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()

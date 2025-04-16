@@ -64,10 +64,22 @@ def generate_dataset(ackermann_data, rigid_body_data):
 
 def visualize_state_history(state_history):
     plt.figure()
-    plt.plot(state_history[:, 0], state_history[:, 1], 'ro')
+
+    # Add ellipse to represent boundary function
+    theta = np.linspace(0, 2 * np.pi, 100)
+    a = 3.5 
+    b = 2.5
+    x0, y0 = (0.5, 0.0)
+    x = x0 + a * np.cos(theta)
+    y = y0 + b * np.sin(theta)
+    plt.plot(x, y, 'b--', label='Ellipse')
+
+    # plot the state history
+    plt.plot(state_history[:, 0], state_history[:, 1], 'ro', label='State History')
     plt.xlabel('X Position')
     plt.ylabel('Y Position')
     plt.title('State History')
+    plt.legend()
     plt.show()
 
 def visualize_control_history(control_history):
