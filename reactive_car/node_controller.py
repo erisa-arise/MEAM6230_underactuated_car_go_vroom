@@ -36,7 +36,15 @@ class NeuralODEController(Node):
         self.gamma: float = 1.0
         self.ellipse_center: Tuple[float, float] = (0.5, 0.0)
 
+        # control lyapunov function parameters
+        self.nominal_trajectory: np.ndarray[np.float32] | None = None
+        self.alpha: float = 1.0
+
     def odom_callback(self, msg: RigidBodies):
+        if self.nominal_trajectory is None:
+            self.get_logger().warn('Nominal trajectory not set. Skipping control.')
+            return
+        
         # extract orientation and position from the VICON ROS2 message
         orientation: Quaternion = msg.rigidbodies.pose.orientation
         position: Vector3 = msg.rigidbodies.pose.position
@@ -119,6 +127,13 @@ class NeuralODEController(Node):
 
     def control_lyapunov_function_gradient(self, state: np.ndarray[np.float32]):
         # V'(x)
+        pass
+
+    def rollout_nominal_trajectory(self, state_0: np.ndarray[np.float32]):
+        # computes the nominal trajectory using the neural ODE
+        pass
+
+    def calculate_track_point(self, state: np.ndarray[np.float32]):
         pass
 
 def main(args=None):
