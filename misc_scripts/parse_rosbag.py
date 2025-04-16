@@ -5,10 +5,10 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 
-def load_messages(bag_path, topic_name, msg_type_str):
-    reader = SequentialReader()
-    storage_options = StorageOptions(uri=bag_path, storage_id='sqlite3')
-    converter_options = ConverterOptions(input_serialization_format='cdr', output_serialization_format='cdr')
+def load_messages(bag_path: str, topic_name: str, msg_type_str: str):
+    reader: SequentialReader = SequentialReader()
+    storage_options: StorageOptions = StorageOptions(uri=bag_path, storage_id='sqlite3')
+    converter_options: ConverterOptions = ConverterOptions(input_serialization_format='cdr', output_serialization_format='cdr')
     reader.open(storage_options, converter_options)
 
     msg_type = get_message(msg_type_str)
@@ -80,12 +80,11 @@ def visualize_control_history(control_history):
 
 
 if __name__ == "__main__":
-    rosbag_path = "/home/frankgon/Desktop/UPenn/MEAM_6230/final_project/data/rosbag2_2025_04_11-23_21_31"
+    rosbag_path = "/home/frankgon/ros2_ws/src/reactive_car/data/rosbag2_2025_04_11-23_21_31"
     rigid_body_name = "racecar_vroom.racecar_vroom"
     ackermann_messages = load_messages(rosbag_path, "/ackermann_cmd", "ackermann_msgs/msg/AckermannDriveStamped")
     rigid_body_messages = load_messages(rosbag_path, "/rigid_bodies", "mocap4r2_msgs/msg/RigidBodies")
 
     ackermann_data, pose_data = reduce_data(ackermann_messages, rigid_body_messages, rigid_body_name)
     state_history, control_history = generate_dataset(ackermann_data, pose_data)
-    print(state_history.shape, control_history.shape)
     visualize_state_history(state_history)
