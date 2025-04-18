@@ -4,6 +4,7 @@ from rosidl_runtime_py.utilities import get_message
 import numpy as np
 import math
 import matplotlib.pyplot as plt
+import os
 
 def load_messages(bag_path: str, topic_name: str, msg_type_str: str):
     reader: SequentialReader = SequentialReader()
@@ -92,8 +93,9 @@ def visualize_control_history(control_history):
 
 
 if __name__ == "__main__":
-    rosbag_path = "/home/ubuntu/MEAM6230/final_proj/src/MEAM6230_Underactuated_ODE/data/rosbag2_2025_04_11-23_21_31"
-    out_dir = "/home/ubuntu/MEAM6230/final_proj/src/MEAM6230_Underactuated_ODE/data/"
+    filepath = os.path.dirname(os.path.abspath(__file__))
+    rosbag_path = f"{filepath}/../data/rosbag2_2025_04_11-23_21_31"
+    out_dir = f"{filepath}/../data/"
     rigid_body_name = "racecar_vroom.racecar_vroom"
     ackermann_messages = load_messages(rosbag_path, "/ackermann_cmd", "ackermann_msgs/msg/AckermannDriveStamped")
     rigid_body_messages = load_messages(rosbag_path, "/rigid_bodies", "mocap4r2_msgs/msg/RigidBodies")

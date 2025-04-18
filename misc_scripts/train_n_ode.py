@@ -4,6 +4,7 @@ from torch.utils.data import Dataset, DataLoader
 from n_ode import N_ODE
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+import os
 
 class node_dataset(Dataset):
     def __init__(self, x_path, y_path):
@@ -53,8 +54,9 @@ def train(ds, epochs=10, batch_size = 32):
     
 
 if __name__ == "__main__":
-    x_path = "/home/ubuntu/MEAM6230/final_proj/src/MEAM6230_Underactuated_ODE/data/state_history.npy"
-    y_path = "/home/ubuntu/MEAM6230/final_proj/src/MEAM6230_Underactuated_ODE/data/control_history.npy"
+    filepath = os.path.dirname(os.path.abspath(__file__))
+    x_path = f"{filepath}/../data/state_history.npy"
+    y_path = f"{filepath}/../data/control_history.npy"
 
     ds = node_dataset(x_path, y_path)
 
