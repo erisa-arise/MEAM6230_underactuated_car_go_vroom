@@ -92,11 +92,19 @@ def visualize_control_history(control_history):
 
 
 if __name__ == "__main__":
-    rosbag_path = "/home/frankgon/ros2_ws/src/reactive_car/data/rosbag2_2025_04_11-23_21_31"
+    rosbag_path = "/home/ubuntu/MEAM6230/final_proj/src/MEAM6230_Underactuated_ODE/data/rosbag2_2025_04_11-23_21_31"
+    out_dir = "/home/ubuntu/MEAM6230/final_proj/src/MEAM6230_Underactuated_ODE/data/"
     rigid_body_name = "racecar_vroom.racecar_vroom"
     ackermann_messages = load_messages(rosbag_path, "/ackermann_cmd", "ackermann_msgs/msg/AckermannDriveStamped")
     rigid_body_messages = load_messages(rosbag_path, "/rigid_bodies", "mocap4r2_msgs/msg/RigidBodies")
 
     ackermann_data, pose_data = reduce_data(ackermann_messages, rigid_body_messages, rigid_body_name)
     state_history, control_history = generate_dataset(ackermann_data, pose_data)
+
+    out_state_path = out_dir + "state_history"
+    out_control_path = out_dir + "control_history"
+
+    np.save(out_state_path, state_history)
+    np.save(out_control_path, control_history)
+
     visualize_state_history(state_history)
