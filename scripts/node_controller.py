@@ -48,8 +48,8 @@ class NeuralODEController(Node):
         self.ellipse_center: Tuple[float, float] = (0.5, 0.0)
 
         # control lyapunov function parameters
-        self.nominal_trajectory: np.ndarray[np.float32] | None = None
         self.alpha: float = 1.0
+        self.lookahead_index: int = 5
 
         # trajectory rollout parameters
         self.dt: float = 0.05
@@ -80,7 +80,7 @@ class NeuralODEController(Node):
         state = np.array([position.x, position.y, yaw])
         state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
         with torch.no_grad():
-            n_ode_output = self.model(state_tensor) # Waiting on josh's n_ode input script  
+            n_ode_output: torch.Tensor = self.model(state_tensor) # Waiting on josh's n_ode input script  
 
         # convert Neural ODE output to x_dot and then compute the safe control
         x_dot: np.ndarray[np.float32] = self.map_n_ode_to_x_dot(n_ode_output)
@@ -105,8 +105,12 @@ class NeuralODEController(Node):
         x_dot: np.ndarray[np.float32] = np.array([v * math.cos(delta), v * math.sin(delta), v/self.L * math.tan(delta)])
         return x_dot
 
-    def compute_safe_control(self, state: np.ndarray[np.float32], x_dot: np.ndarray[np.float32]) -> Tuple[float]:
+    def compute_safe_control(self, state: np.ndarray[np.float32], track_point: np.ndarray[np.float32]) -> Tuple[float]:
         # Computes the safe control using the control barrier function, control lyapunov function, and solves a QP using Casadi
+
+        track_point_velocity: torch.Tensor = self.model(torch.tensor(track_point, dtype=torch.float32).unsqueeze(0))
+        track_point_xdot: np.ndarray[np.float32] = self.map_n_ode_to_x_dot(track_point_velocity)
+
         x: MX = casadi.MX.sym('x')
         y: MX = casadi.MX.sym('y')
         theta: MX = casadi.MX.sym('theta')
@@ -148,8 +152,15 @@ class NeuralODEController(Node):
         return db_dx
 
     def control_lyapunov_function_2d(self, state: np.ndarray[np.float32]):
-        # V(x)
-        pass
+        # for each potential trackpoint, calculate the necessary control action
+        # and return the control action with the smallest norm
+
+        track_points: np.ndarray[np.float32] = self.calculate_track_points_2d(state)
+        for i in range(self.lookahead_index):
+            track_point: np.ndarray[np.float32] = track_points[:, i]
+            v, delta = self.compute_safe_control(state, track_point)
+            # TODO: Store the control action and return the one with the smallest norm
+
 
     def control_lyapunov_function_gradient_2d(self, state: np.ndarray[np.float32]):
         # V'(x)
@@ -165,8 +176,15 @@ class NeuralODEController(Node):
             current_state = current_state + x_dot * self.dt
             self.rollout_state_history[:, i] = current_state.squeeze().numpy()
 
-    def calculate_track_point_2d(self, state: np.ndarray[np.float32]):
-        pass
+    def calculate_track_points_2d(self, state: np.ndarray[np.float32]) -> np.ndarray[np.float32]:
+        # returns the closest point on the track to the current state and the next
+        # self.lookahead_index points on the track
+
+        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory - state, axis=0))
+        track_points: np.ndarray[np.float32] = np.zeros((2, self.lookahead_index))
+        for i in range(self.lookahead_index):
+            track_points[:, i] = self.nominal_trajectory[:, (closest_index + i) % self.nominal_trajectory.shape[1]]
+        return track_points
 
 def main(args=None):
     rclpy.init(args=args)
