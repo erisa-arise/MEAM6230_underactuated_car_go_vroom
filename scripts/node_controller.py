@@ -84,7 +84,7 @@ class NeuralODEController(Node):
 
         # convert Neural ODE output to x_dot and then compute the safe control
         x_dot: np.ndarray[np.float32] = self.map_n_ode_to_x_dot(n_ode_output)
-        v_safe, delta_safe = self.compute_safe_control(x_dot) 
+        v_safe, delta_safe = self.compute_safe_control(state) 
         
         # publish the safe velocitya and steering angle
         ackermann_msg: AckermannDrive = AckermannDrive()
@@ -105,17 +105,35 @@ class NeuralODEController(Node):
         x_dot: np.ndarray[np.float32] = np.array([v * math.cos(delta), v * math.sin(delta), v/self.L * math.tan(delta)])
         return x_dot
 
-    def compute_safe_control(self, state: np.ndarray[np.float32], track_point: np.ndarray[np.float32]) -> Tuple[float]:
-        # Computes the safe control using the control barrier function, control lyapunov function, and solves a QP using Casadi
+    def compute_safe_control(self, state: np.ndarray[np.float32]) -> Tuple[float]:
+        # determine the safe control input by scanning across the next self.lookahead_index points on the track
+        track_points: np.ndarray[np.float32] = self.calculate_track_points_2d(state)
 
-        track_point_velocity: torch.Tensor = self.model(torch.tensor(track_point, dtype=torch.float32).unsqueeze(0))
-        track_point_xdot: np.ndarray[np.float32] = self.map_n_ode_to_x_dot(track_point_velocity)
+        controls: List[Tuple[float]] = []
+        for i in range(self.lookahead_index):
+            track_point = track_points[:, i]
+            track_point_velocity: torch.Tensor = self.model(torch.tensor(track_point, dtype=torch.float32).unsqueeze(0))
+            track_point_xdot: np.ndarray[np.float32] = self.map_n_ode_to_x_dot(track_point_velocity)
+            error_state: np.ndarray[np.float32] = state - track_point
+            residual_control: Tuple[float] = self.solve_control_optimization(state, error_state, track_point_xdot)
+            controls.append(residual_control)
 
+        # TODO: choose the minimum control output
+        v, delta = controls[0]
+
+        # publish the ackermann command
+        ackermann_msg: AckermannDrive = AckermannDrive()
+        ackermann_msg.speed = v
+        ackermann_msg.steering_angle = delta
+        self.ackermann_publisher.publish(ackermann_msg)
+    
+    def solve_control_optimization(self, state: np.ndarray[np.float32], error_state: np.ndarray[np.float32], 
+                                    track_point_xdot: np.ndarray[np.float32]) -> Tuple[float]:
         x: MX = casadi.MX.sym('x')
         y: MX = casadi.MX.sym('y')
         theta: MX = casadi.MX.sym('theta')
 
-        gamma: float = 1.0  # Weight TODO: Tune
+        lambda_: float = 1.0  # Weight TODO: Tune
         epsilon: MX = casadi.MX.sym('epsilon')  # Slack variable
 
         v: MX = casadi.MX.sym('v')
@@ -123,7 +141,7 @@ class NeuralODEController(Node):
         delta_upper_bound: float = casadi.pi / 4  # 45 degrees
         delta_lower_bound: float = -casadi.pi / 4
 
-        cost: MX = v**2 + delta**2 + gamma*epsilon
+        cost: MX = v**2 + delta**2 + lambda_*epsilon
 
         constraints: List[MX] = []
         constraint_lower_bound: List[float] = []
@@ -151,20 +169,16 @@ class NeuralODEController(Node):
         db_dx[1] = -2 * (state[1] - self.ellipse_center[1]) / (self.b**2)
         return db_dx
 
-    def control_lyapunov_function_2d(self, state: np.ndarray[np.float32]):
-        # for each potential trackpoint, calculate the necessary control action
-        # and return the control action with the smallest norm
+    def control_lyapunov_function_2d(self, error_state: np.ndarray[np.float32]):
+        # defines a quadratic lyapunov function based on the error state
+        return (error_state[0]**2 + error_state[1]**2)**0.5
 
-        track_points: np.ndarray[np.float32] = self.calculate_track_points_2d(state)
-        for i in range(self.lookahead_index):
-            track_point: np.ndarray[np.float32] = track_points[:, i]
-            v, delta = self.compute_safe_control(state, track_point)
-            # TODO: Store the control action and return the one with the smallest norm
-
-
-    def control_lyapunov_function_gradient_2d(self, state: np.ndarray[np.float32]):
-        # V'(x)
-        pass
+    def control_lyapunov_function_gradient_2d(self, error_state: np.ndarray[np.float32]) -> casadi.DM:
+        # defines the gradient of the error state control lypaunov function
+        dV_dx: casadi.DM = casadi.DM(2, 1)
+        dV_dx[0] = 0.5 * (error_state[0]**2 + error_state[1]**2)**(-0.5) * 2 * error_state[0]
+        dV_dx[1] = 0.5 * (error_state[0]**2 + error_state[1]**2)**(-0.5) * 2 * error_state[1]
+        return dV_dx
 
     def rollout_nominal_trajectory(self, state_0: np.ndarray[np.float32]):
         # computes the nominal trajectory using the neural ODE
