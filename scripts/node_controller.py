@@ -65,10 +65,34 @@ class NeuralODEController(Node):
         Callback function for the GenerateNominalTrajectory service. Generates a nominal trajectory 
         using the neural ODE model.
         """
+
+        state_0: np.ndarray[np.float32] = np.array([[self.latest_odom.rigidbodies.pose.position.x],
+                                                    [self.latest_odom.rigidbodies.pose.position.y],
+                                                    [self.get_yaw_from_quaternion(self.latest_odom.rigidbodies.pose.orientation)]])
+        self.get_logger().info(f'Generating nominal trajectory with initial state: {state_0}')
+        self.rollout_nominal_trajectory(state_0)
+
         response.success = True
         response.message = "Generated Nominal Trajectory"
         self.get_logger().info('Service called: returning nominal trajectory generation success.')
         return response
+    
+    def rollout_nominal_trajectory(self, state_0: np.ndarray[np.float32]) -> None:
+        """
+        Computes the nominal trajectory using the neural ODE model.
+        
+        Args:
+            state_0 (np.ndarray): The initial state of the car in the form [x, y, theta]
+        Returns: 
+            None
+        """
+        current_state: torch.Tensor = torch.tensor(state_0, dtype=torch.float32).unsqueeze(0)
+        for i in range(self.rollout_length):
+            with torch.no_grad():
+                n_ode_output = self.model(current_state)
+            x_dot: np.ndarray[np.float32] = self.map_n_ode_to_x_dot(n_ode_output)
+            current_state = current_state + x_dot * self.dt
+            self.rollout_state_history[:, i] = current_state.squeeze().numpy()
 
     def odom_callback(self, msg: RigidBodies) -> None:
         """
@@ -91,13 +115,9 @@ class NeuralODEController(Node):
         yaw: float = self.get_yaw_from_quaternion(orientation)
 
         # create the state tensor and query the Neural ODE
-        state = np.array([position.x, position.y, yaw])
-        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-        with torch.no_grad():
-            n_ode_output: torch.Tensor = self.model(state_tensor) # Waiting on josh's n_ode input script  
+        state = np.array([position.x, position.y, yaw])  
 
-        # convert Neural ODE output to x_dot and then compute the safe control
-        x_dot: np.ndarray[np.float32] = self.map_n_ode_to_x_dot(n_ode_output)
+        # compute the safe control
         v_safe, delta_safe = self.compute_safe_control(state) 
         
         # publish the safe velocitya and steering angle
@@ -105,19 +125,6 @@ class NeuralODEController(Node):
         ackermann_msg.speed = v_safe
         ackermann_msg.steering_angle = delta_safe
         self.ackermann_publisher.publish(ackermann_msg)    
-
-    def get_yaw_from_quaternion(self, q: Quaternion) -> float:
-        """
-        Converts a quaternion to yaw angle.
-        
-        Args:
-            q (Quaternion): The quaternion to convert
-        Returns:
-            yaw (float): The yaw angle in radians
-        """
-        siny_cosp: float = 2 * (q.w * q.z + q.x * q.y)
-        cosy_cosp: float = 1 - 2 * (q.y * q.y + q.z * q.z)
-        return math.atan2(siny_cosp, cosy_cosp)
     
     def map_n_ode_to_x_dot(self, n_ode_output: torch.Tensor) -> np.ndarray[np.float32]:
         """
@@ -159,6 +166,21 @@ class NeuralODEController(Node):
         v_safe, delta_safe = min(controls, key=lambda x: abs(x[0])/self.v_max + abs(x[1])/self.delta_max)
 
         return v_safe, delta_safe
+    
+    def calculate_track_points_2d(self, state: np.ndarray[np.float32]) -> np.ndarray[np.float32]:
+        """
+        Computes the next self.lookahead_index points on the track.
+        
+        Args:
+            state (np.ndarray): The current state of the car in the form [x, y, theta]
+        Returns:
+            track_points (np.ndarray): The next self.lookahead_index points on the track
+        """
+        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory - state, axis=0))
+        track_points: np.ndarray[np.float32] = np.zeros((2, self.lookahead_index))
+        for i in range(self.lookahead_index):
+            track_points[:, i] = self.nominal_trajectory[:, (closest_index + i) % self.nominal_trajectory.shape[1]]
+        return track_points
     
     def solve_control_optimization(self, state: np.ndarray[np.float32], error_state: np.ndarray[np.float32], 
                                     track_point_xdot: np.ndarray[np.float32]) -> Tuple[float]:
@@ -241,38 +263,19 @@ class NeuralODEController(Node):
         dV_dx[0] = 0.5 * (error_state[0]**2 + error_state[1]**2)**(-0.5) * 2 * error_state[0]
         dV_dx[1] = 0.5 * (error_state[0]**2 + error_state[1]**2)**(-0.5) * 2 * error_state[1]
         return dV_dx
-
-    def rollout_nominal_trajectory(self, state_0: np.ndarray[np.float32]) -> None:
+    
+    def get_yaw_from_quaternion(self, q: Quaternion) -> float:
         """
-        Computes the nominal trajectory using the neural ODE model.
+        Converts a quaternion to yaw angle.
         
         Args:
-            state_0 (np.ndarray): The initial state of the car in the form [x, y, theta]
-        Returns: 
-            None
-        """
-        current_state: torch.Tensor = torch.tensor(state_0, dtype=torch.float32).unsqueeze(0)
-        for i in range(self.rollout_length):
-            with torch.no_grad():
-                n_ode_output = self.model(current_state)
-            x_dot: np.ndarray[np.float32] = self.map_n_ode_to_x_dot(n_ode_output)
-            current_state = current_state + x_dot * self.dt
-            self.rollout_state_history[:, i] = current_state.squeeze().numpy()
-
-    def calculate_track_points_2d(self, state: np.ndarray[np.float32]) -> np.ndarray[np.float32]:
-        """
-        Computes the next self.lookahead_index points on the track.
-        
-        Args:
-            state (np.ndarray): The current state of the car in the form [x, y, theta]
+            q (Quaternion): The quaternion to convert
         Returns:
-            track_points (np.ndarray): The next self.lookahead_index points on the track
+            yaw (float): The yaw angle in radians
         """
-        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory - state, axis=0))
-        track_points: np.ndarray[np.float32] = np.zeros((2, self.lookahead_index))
-        for i in range(self.lookahead_index):
-            track_points[:, i] = self.nominal_trajectory[:, (closest_index + i) % self.nominal_trajectory.shape[1]]
-        return track_points
+        siny_cosp: float = 2 * (q.w * q.z + q.x * q.y)
+        cosy_cosp: float = 1 - 2 * (q.y * q.y + q.z * q.z)
+        return math.atan2(siny_cosp, cosy_cosp)
 
 def main(args=None):
     rclpy.init(args=args)
