@@ -40,6 +40,8 @@ class NeuralODEController(Node):
 
         # car parameters
         self.L: float = 1.0
+        self.v_max: float = 2.0
+        self.delta_max: float = math.pi / 4
 
         # control barrier function parameters
         self.a: float = 3.5
@@ -132,6 +134,15 @@ class NeuralODEController(Node):
         return x_dot
 
     def compute_safe_control(self, state: np.ndarray[np.float32]) -> Tuple[float]:
+        """
+        Gets candidate trackpoints and chooses the smallest residual control.
+
+        Args:
+            state (np.ndarray): The current state of the car in the form [x, y, theta]
+        Returns:
+            v_safe (float): The safe velocity
+            delta_safe (float): The safe steering angle
+        """
         # determine the safe control input by scanning across the next self.lookahead_index points on the track
         track_points: np.ndarray[np.float32] = self.calculate_track_points_2d(state)
 
@@ -144,8 +155,8 @@ class NeuralODEController(Node):
             residual_control: Tuple[float] = self.solve_control_optimization(state, error_state, track_point_xdot)
             controls.append(residual_control)
 
-        # TODO: choose the minimum control output
-        v_safe, delta_safe = controls[0]
+        # choose the smallest residual control
+        v_safe, delta_safe = min(controls, key=lambda x: abs(x[0])/self.v_max + abs(x[1])/self.delta_max)
 
         return v_safe, delta_safe
     
