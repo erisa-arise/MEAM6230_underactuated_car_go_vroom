@@ -1,7 +1,5 @@
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
 class N_ODE(nn.Module):
     def __init__(self, input_dim=3, out_dim=2, hidden_dim=64):

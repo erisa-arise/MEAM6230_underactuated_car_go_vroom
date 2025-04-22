@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+
+import sys
+import os
 import rclpy
 import torch
 import math
@@ -5,27 +9,34 @@ import casadi
 import numpy as np
 
 from casadi import MX, DM, SX
+
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
+
 from geometry_msgs.msg import Quaternion, Vector3
 from ackermann_msgs.msg import AckermannDrive
 from mocap4r2_msgs.msg import RigidBodies
-from misc_scripts.n_ode import N_ODE
+
+from reactive_car.srv import GenerateNominalTrajectory
+from utils.n_ode import N_ODE
 from typing import Tuple, List
 
 
 class NeuralODEController(Node):
     def __init__(self) -> None:
         super().__init__('Neural_ODE_Controller')
+        self.srv = self.create_service(GenerateNominalTrajectory,'generate_nominal_trajectory',self.generate_nominal_trajectory_callback)
         self.vicon_subscriber: Subscription = self.create_subscription(RigidBodies, '/odom_topic', self.odom_callback, 10)
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDrive, '/ackermann_cmd', 10)
-        self.get_logger().info('Initialized NODE Controller')
+
+        self.latest_odom: RigidBodies | None = None
+        self.nominal_trajectory: np.ndarray[np.float32] | None = None
 
         # load the neural ODE model here
         self.model: N_ODE = N_ODE()
-        self.model.load_state_dict(torch.load('model_weights.pth'))
-        self.model.eval()
+        # self.model.load_state_dict(torch.load('model_weights.pth'))
+        # self.model.eval()
 
         # car parameters
         self.L: float = 1.0
@@ -40,7 +51,17 @@ class NeuralODEController(Node):
         self.nominal_trajectory: np.ndarray[np.float32] | None = None
         self.alpha: float = 1.0
 
+        self.get_logger().info('Initialized NODE Controller')
+
+    def generate_nominal_trajectory_callback(self, request, response):
+        response.success = True
+        response.message = "Generated Nominal Trajectory"
+        self.get_logger().info('Service called: returning nominal trajectory generation success.')
+        return response
+
     def odom_callback(self, msg: RigidBodies):
+        self.latest_odom = msg
+
         if self.nominal_trajectory is None:
             self.get_logger().warn('Nominal trajectory not set. Skipping control.')
             return
@@ -72,7 +93,7 @@ class NeuralODEController(Node):
         cosy_cosp: float = 1 - 2 * (q.y * q.y + q.z * q.z)
         return math.atan2(siny_cosp, cosy_cosp)
     
-    def map_n_ode_to_x_dot(self, n_ode_output: torch.Tensor[torch.float32]) -> np.ndarray[np.float32]:
+    def map_n_ode_to_x_dot(self, n_ode_output: torch.Tensor) -> np.ndarray[np.float32]:
         # Converts using the car dynamics model 
         v: float = n_ode_output[0][0].item()
         delta: float = n_ode_output[0][1].item()
@@ -107,25 +128,25 @@ class NeuralODEController(Node):
         
         return v, delta
     
-    def control_boundary_function(self, state: np.ndarray[np.float32]) -> np.ndarray[np.float32]:
+    def control_boundary_function_2d(self, state: np.ndarray[np.float32]) -> np.ndarray[np.float32]:
         # defines the control barrier function for an elliptical boundary around the track
         b_x: np.ndarray[np.float32] = 1 - np.array([[
             ((state[0] - self.ellipse_center[0]) / self.a)**2,
             ((state[1] - self.ellipse_center[1]) / self.b)**2]])
         return b_x
 
-    def control_boundary_function_gradient(self, state: np.ndarray[np.float32]) -> casadi.DM:
+    def control_boundary_function_gradient_2d(self, state: np.ndarray[np.float32]) -> casadi.DM:
         # defines the gradient for an elliptical boundary around the track
         db_dx: casadi.DM = casadi.DM(2, 1)
         db_dx[0] = -2 * (state[0] - self.ellipse_center[0]) / (self.a**2)
         db_dx[1] = -2 * (state[1] - self.ellipse_center[1]) / (self.b**2)
         return db_dx
 
-    def control_lyapunov_function(self, state: np.ndarray[np.float32]):
+    def control_lyapunov_function_2d(self, state: np.ndarray[np.float32]):
         # V(x)
         pass
 
-    def control_lyapunov_function_gradient(self, state: np.ndarray[np.float32]):
+    def control_lyapunov_function_gradient_2d(self, state: np.ndarray[np.float32]):
         # V'(x)
         pass
 
@@ -133,12 +154,16 @@ class NeuralODEController(Node):
         # computes the nominal trajectory using the neural ODE
         pass
 
-    def calculate_track_point(self, state: np.ndarray[np.float32]):
+    def calculate_track_point_2d(self, state: np.ndarray[np.float32]):
         pass
 
 def main(args=None):
     rclpy.init(args=args)
-    node = NeuralODEController()
+    node: NeuralODEController = NeuralODEController()
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+
