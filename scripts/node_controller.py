@@ -59,12 +59,24 @@ class NeuralODEController(Node):
         self.get_logger().info('Initialized NODE Controller')
 
     def generate_nominal_trajectory_callback(self, request, response):
+        """
+        Callback function for the GenerateNominalTrajectory service. Generates a nominal trajectory 
+        using the neural ODE model.
+        """
         response.success = True
         response.message = "Generated Nominal Trajectory"
         self.get_logger().info('Service called: returning nominal trajectory generation success.')
         return response
 
-    def odom_callback(self, msg: RigidBodies):
+    def odom_callback(self, msg: RigidBodies) -> None:
+        """
+        Callback function for the VICON odometry subscriber. Publishes the safe control command to the car.
+        
+        Args:
+            msg (RigidBodies): The VICON odometry message
+        Returns:
+            None
+        """
         self.latest_odom = msg
 
         if self.nominal_trajectory is None:
@@ -93,13 +105,27 @@ class NeuralODEController(Node):
         self.ackermann_publisher.publish(ackermann_msg)    
 
     def get_yaw_from_quaternion(self, q: Quaternion) -> float:
-        # Convert quaternion to yaw
+        """
+        Converts a quaternion to yaw angle.
+        
+        Args:
+            q (Quaternion): The quaternion to convert
+        Returns:
+            yaw (float): The yaw angle in radians
+        """
         siny_cosp: float = 2 * (q.w * q.z + q.x * q.y)
         cosy_cosp: float = 1 - 2 * (q.y * q.y + q.z * q.z)
         return math.atan2(siny_cosp, cosy_cosp)
     
     def map_n_ode_to_x_dot(self, n_ode_output: torch.Tensor) -> np.ndarray[np.float32]:
-        # Converts using the car dynamics model 
+        """
+        Converts the Neural ODE output to x_dot using the car dynamics model.
+
+        Args:
+            n_ode_output (torch.Tensor): The output of the Neural ODE model
+        Returns:
+            x_dot (np.ndarray): The x_dot vector in the form [x_dot, y_dot, theta_dot]
+        """
         v: float = n_ode_output[0][0].item()
         delta: float = n_ode_output[0][1].item()
         x_dot: np.ndarray[np.float32] = np.array([v * math.cos(delta), v * math.sin(delta), v/self.L * math.tan(delta)])
@@ -119,13 +145,9 @@ class NeuralODEController(Node):
             controls.append(residual_control)
 
         # TODO: choose the minimum control output
-        v, delta = controls[0]
+        v_safe, delta_safe = controls[0]
 
-        # publish the ackermann command
-        ackermann_msg: AckermannDrive = AckermannDrive()
-        ackermann_msg.speed = v
-        ackermann_msg.steering_angle = delta
-        self.ackermann_publisher.publish(ackermann_msg)
+        return v_safe, delta_safe
     
     def solve_control_optimization(self, state: np.ndarray[np.float32], error_state: np.ndarray[np.float32], 
                                     track_point_xdot: np.ndarray[np.float32]) -> Tuple[float]:
@@ -156,32 +178,68 @@ class NeuralODEController(Node):
         return v, delta
     
     def control_boundary_function_2d(self, state: np.ndarray[np.float32]) -> np.ndarray[np.float32]:
-        # defines the control barrier function for an elliptical boundary around the track
+        """
+        Computes the control barrier function.
+        
+        Args:
+            state (np.ndarray): The current state of the car in the form [x, y, theta]
+        Returns:
+            b_x (np.ndarray): The control barrier function
+        """
         b_x: np.ndarray[np.float32] = 1 - np.array([[
             ((state[0] - self.ellipse_center[0]) / self.a)**2,
             ((state[1] - self.ellipse_center[1]) / self.b)**2]])
         return b_x
 
     def control_boundary_function_gradient_2d(self, state: np.ndarray[np.float32]) -> casadi.DM:
-        # defines the gradient for an elliptical boundary around the track
+        """
+        Computes the gradient of the control barrier function.
+
+        Args:
+            state (np.ndarray): The current state of the car in the form [x, y, theta]
+        Returns:
+            db_dx (casadi.DM): The gradient of the control barrier function
+        """
         db_dx: casadi.DM = casadi.DM(2, 1)
         db_dx[0] = -2 * (state[0] - self.ellipse_center[0]) / (self.a**2)
         db_dx[1] = -2 * (state[1] - self.ellipse_center[1]) / (self.b**2)
         return db_dx
 
     def control_lyapunov_function_2d(self, error_state: np.ndarray[np.float32]):
-        # defines a quadratic lyapunov function based on the error state
-        return (error_state[0]**2 + error_state[1]**2)**0.5
+        """
+        Computes the control lyapunov function.
+
+        Args:
+            error_state (np.ndarray): The error state of the car in the form [x, y]
+        Returns:
+            V (float): The control lyapunov function
+        """
+        V = (error_state[0]**2 + error_state[1]**2)**0.5
+        return V
 
     def control_lyapunov_function_gradient_2d(self, error_state: np.ndarray[np.float32]) -> casadi.DM:
-        # defines the gradient of the error state control lypaunov function
+        """
+        Computes the gradient of the control lyapunov function.
+
+        Args:
+            error_state (np.ndarray): The error state of the car in the form [x, y]
+        Returns:
+            dV_dx (casadi.DM): The gradient of the control lyapunov function
+        """
         dV_dx: casadi.DM = casadi.DM(2, 1)
         dV_dx[0] = 0.5 * (error_state[0]**2 + error_state[1]**2)**(-0.5) * 2 * error_state[0]
         dV_dx[1] = 0.5 * (error_state[0]**2 + error_state[1]**2)**(-0.5) * 2 * error_state[1]
         return dV_dx
 
-    def rollout_nominal_trajectory(self, state_0: np.ndarray[np.float32]):
-        # computes the nominal trajectory using the neural ODE
+    def rollout_nominal_trajectory(self, state_0: np.ndarray[np.float32]) -> None:
+        """
+        Computes the nominal trajectory using the neural ODE model.
+        
+        Args:
+            state_0 (np.ndarray): The initial state of the car in the form [x, y, theta]
+        Returns: 
+            None
+        """
         current_state: torch.Tensor = torch.tensor(state_0, dtype=torch.float32).unsqueeze(0)
         for i in range(self.rollout_length):
             with torch.no_grad():
@@ -191,9 +249,14 @@ class NeuralODEController(Node):
             self.rollout_state_history[:, i] = current_state.squeeze().numpy()
 
     def calculate_track_points_2d(self, state: np.ndarray[np.float32]) -> np.ndarray[np.float32]:
-        # returns the closest point on the track to the current state and the next
-        # self.lookahead_index points on the track
-
+        """
+        Computes the next self.lookahead_index points on the track.
+        
+        Args:
+            state (np.ndarray): The current state of the car in the form [x, y, theta]
+        Returns:
+            track_points (np.ndarray): The next self.lookahead_index points on the track
+        """
         closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory - state, axis=0))
         track_points: np.ndarray[np.float32] = np.zeros((2, self.lookahead_index))
         for i in range(self.lookahead_index):
