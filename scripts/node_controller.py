@@ -35,8 +35,8 @@ class NeuralODEController(Node):
 
         # load the neural ODE model here
         self.model: N_ODE = N_ODE()
-        # self.model.load_state_dict(torch.load('model_weights.pth'))
-        # self.model.eval()
+        self.model.load_state_dict(torch.load('model_weights.pth'))
+        self.model.eval()
 
         # car parameters
         self.L: float = 1.0
@@ -50,6 +50,11 @@ class NeuralODEController(Node):
         # control lyapunov function parameters
         self.nominal_trajectory: np.ndarray[np.float32] | None = None
         self.alpha: float = 1.0
+
+        # trajectory rollout parameters
+        self.dt: float = 0.05
+        self.rollout_length: int = 100
+        self.rollout_state_history: np.ndarray[np.float32] = np.zeros((3, self.rollout_length), dtype=np.float32)
 
         self.get_logger().info('Initialized NODE Controller')
 
@@ -152,7 +157,13 @@ class NeuralODEController(Node):
 
     def rollout_nominal_trajectory(self, state_0: np.ndarray[np.float32]):
         # computes the nominal trajectory using the neural ODE
-        pass
+        current_state: torch.Tensor = torch.tensor(state_0, dtype=torch.float32).unsqueeze(0)
+        for i in range(self.rollout_length):
+            with torch.no_grad():
+                n_ode_output = self.model(current_state)
+            x_dot: np.ndarray[np.float32] = self.map_n_ode_to_x_dot(n_ode_output)
+            current_state = current_state + x_dot * self.dt
+            self.rollout_state_history[:, i] = current_state.squeeze().numpy()
 
     def calculate_track_point_2d(self, state: np.ndarray[np.float32]):
         pass
