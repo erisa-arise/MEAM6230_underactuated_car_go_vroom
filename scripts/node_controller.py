@@ -35,9 +35,9 @@ class NeuralODEController(Node):
 
         # load the neural ODE model here
         self.file_path = os.path.dirname(os.path.abspath(__file__))
-        model_path = os.path.join(self.file_path, 'model_weights.pth')
+        model_path = os.path.join(self.file_path, 'utils', 'n_ode_model.pth')
         self.model: N_ODE = N_ODE()
-        self.model.load_state_dict(torch.load(model_path))
+        self.model.load_state_dict(torch.load(model_path))  
         self.model.eval()
 
         # car parameters
