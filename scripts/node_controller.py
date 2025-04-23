@@ -62,8 +62,8 @@ class NeuralODEController(Node):
         self.lookahead_index: int = 5
 
         # trajectory rollout parameters
-        self.dt: float = 0.05
-        self.rollout_length: int = 1000
+        self.dt: float = 0.01
+        self.rollout_length: int = 100
         self.nominal_trajectory: np.ndarray | None = None
 
         self.get_logger().info('Initialized NODE Controller')
@@ -291,7 +291,7 @@ class NeuralODEController(Node):
         Returns:
             b_x (np.ndarray): The control barrier function
         """
-        b_x: float = 1 - ((state[0] - self.ellipse_center[0]) / self.a)**2 - ((state[1] - self.ellipse_center[1]) / self.b)**2
+        b_x: float = 1 - ((state[0][0] - self.ellipse_center[0]) / self.a)**2 - ((state[1][0] - self.ellipse_center[1]) / self.b)**2
         return b_x
 
     def control_boundary_function_gradient_2d(self, state: np.ndarray) -> casadi.DM:
@@ -309,7 +309,7 @@ class NeuralODEController(Node):
         db_dx[2] = 0
         return db_dx
 
-    def control_lyapunov_function_2d(self, error_state: np.ndarray):
+    def control_lyapunov_function_2d(self, error_state: np.ndarray) -> float:
         """
         Computes the control lyapunov function.
 
@@ -318,7 +318,7 @@ class NeuralODEController(Node):
         Returns:
             V (float): The control lyapunov function
         """
-        V = (error_state[0]**2 + error_state[1]**2)**0.5
+        V = (error_state[0][0]**2 + error_state[1][0]**2)**0.5
         return V
 
     def control_lyapunov_function_gradient_2d(self, error_state: np.ndarray) -> casadi.DM:
