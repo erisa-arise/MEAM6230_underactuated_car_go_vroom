@@ -15,8 +15,9 @@ from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
 
 from geometry_msgs.msg import Quaternion, Vector3
-from ackermann_msgs.msg import AckermannDrive
+from ackermann_msgs.msg import AckermannDriveStamped
 from mocap4r2_msgs.msg import RigidBodies
+from nav_msgs.msg import Odometry
 
 from reactive_car.srv import GenerateNominalTrajectory
 from utils.n_ode import N_ODE
@@ -27,11 +28,12 @@ class NeuralODEController(Node):
     def __init__(self) -> None:
         super().__init__('Neural_ODE_Controller')
         self.srv = self.create_service(GenerateNominalTrajectory,'generate_nominal_trajectory',self.generate_nominal_trajectory_callback)
-        self.vicon_subscriber: Subscription = self.create_subscription(RigidBodies, '/odom_topic', self.odom_callback, 10)
-        self.ackermann_publisher: Publisher = self.create_publisher(AckermannDrive, '/ackermann_cmd', 10)
+        # self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/odom_topic', self.odom_callback, 10)
+        self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
+        self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/ackermann_cmd', 10)
 
-        self.latest_odom: RigidBodies | None = None
-        self.nominal_trajectory: np.ndarray | None = None
+        self.latest_position: np.ndarray | None = None
+        self.latest_quaternion: Quaternion | None = None
 
         # load the neural ODE model here
         self.file_path = os.path.dirname(os.path.abspath(__file__))
@@ -61,7 +63,7 @@ class NeuralODEController(Node):
         # trajectory rollout parameters
         self.dt: float = 0.05
         self.rollout_length: int = 100
-        self.rollout_state_history: np.ndarray = np.zeros((3, self.rollout_length), dtype=np.float32)
+        self.nominal_trajectory: np.ndarray | None = None
 
         self.get_logger().info('Initialized NODE Controller')
 
@@ -70,10 +72,8 @@ class NeuralODEController(Node):
         Callback function for the GenerateNominalTrajectory service. Generates a nominal trajectory 
         using the neural ODE model.
         """
-
-        state_0: np.ndarray = np.array([[self.latest_odom.rigidbodies.pose.position.x],
-                                                    [self.latest_odom.rigidbodies.pose.position.y],
-                                                    [self.get_yaw_from_quaternion(self.latest_odom.rigidbodies.pose.orientation)]])
+        state_0: np.ndarray = np.array([[self.latest_position.x, self.latest_position.y,
+                                        self.get_yaw_from_quaternion(self.latest_quaternion)]])
         self.get_logger().info(f'Generating nominal trajectory with initial state: {state_0}')
         self.rollout_nominal_trajectory(state_0)
 
@@ -91,13 +91,15 @@ class NeuralODEController(Node):
         Returns: 
             None
         """
-        current_state: torch.Tensor = torch.tensor(state_0, dtype=torch.float32).unsqueeze(0)
+        self.nominal_trajectory = np.zeros((3, self.rollout_length), dtype=np.float32)
+
+        current_state: torch.Tensor = torch.tensor(state_0, dtype=torch.float32)
         for i in range(self.rollout_length):
             with torch.no_grad():
                 n_ode_output: torch.Tensor = self.model(current_state)
             x_dot: np.ndarray = self.map_n_ode_to_x_dot(n_ode_output)
-            current_state = current_state + x_dot * self.dt
-            self.rollout_state_history[:, i] = current_state.squeeze().numpy()
+            current_state = (current_state + x_dot * self.dt).float()
+            self.nominal_trajectory[:, i] = current_state.squeeze().numpy()
 
     def map_n_ode_to_x_dot(self, n_ode_output: torch.Tensor) -> np.ndarray:
         """
@@ -124,23 +126,28 @@ class NeuralODEController(Node):
         """
         self.latest_odom = msg
 
+        # extract orientation and position from the VICON ROS2 message
+        # self.latest_quaternion = msg.rigidbodies.pose.orientation
+        # self.latest_position = msg.rigidbodies.pose.position
+        # yaw = self.get_yaw_from_quaternion(self.latest_quaternion)
+
+        # extract orientation and position from the Sim Odometry message
+        self.latest_quaternion = msg.pose.pose.orientation
+        self.latest_position = msg.pose.pose.position
+        yaw = self.get_yaw_from_quaternion(self.latest_quaternion)
+
         if self.nominal_trajectory is None:
             self.get_logger().warn('Nominal trajectory not set. Skipping control.')
             return
-        
-        # extract orientation and position from the VICON ROS2 message
-        orientation: Quaternion = msg.rigidbodies.pose.orientation
-        position: Vector3 = msg.rigidbodies.pose.position
-        yaw: float = self.get_yaw_from_quaternion(orientation)
 
         # create the state tensor and query the Neural ODE
-        state: np.ndarray = np.array([position.x, position.y, yaw])  
+        state: np.ndarray = np.array([[self.latest_position.x, self.latest_position.y, yaw]]).T
 
         # compute the safe control
         v_safe, delta_safe = self.compute_safe_control(state) 
         
         # publish the safe velocitya and steering angle
-        ackermann_msg: AckermannDrive = AckermannDrive()
+        ackermann_msg: AckermannDriveStamped = AckermannDriveStamped()
         ackermann_msg.speed = v_safe
         ackermann_msg.steering_angle = delta_safe
         self.ackermann_publisher.publish(ackermann_msg)    
@@ -156,16 +163,16 @@ class NeuralODEController(Node):
             delta_safe (float): The safe steering angle
         """
         # determine the safe control input by scanning across the next self.lookahead_index points on the track
-        track_points: np.ndarray = self.calculate_track_points_2d(state)
+        track_points: np.ndarray = self.calculate_track_points(state)
 
-        current_state: torch.Tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-        n_ode_output = self.model(current_state)
+        state_tensor: torch.Tensor = torch.tensor(state.T, dtype=torch.float32)
+        n_ode_output = self.model(state_tensor)
         state_xdot: np.ndarray = self.map_n_ode_to_x_dot(n_ode_output)
 
         controls: List[Tuple[float]] = []
         for i in range(self.lookahead_index):
-            track_point = track_points[:, i]
-            track_point_velocity: torch.Tensor = self.model(torch.tensor(track_point, dtype=torch.float32).unsqueeze(0))
+            track_point = track_points[:, i:i+1]
+            track_point_velocity: torch.Tensor = self.model(torch.tensor(track_point.T, dtype=torch.float32))
             track_point_xdot: np.ndarray = self.map_n_ode_to_x_dot(track_point_velocity)
             error_state: np.ndarray = state - track_point
             v_opt, delta_opt = self.solve_control_optimization(state, error_state, track_point_xdot, state_xdot)
@@ -182,7 +189,7 @@ class NeuralODEController(Node):
 
         return v_safe, delta_safe
     
-    def calculate_track_points_2d(self, state: np.ndarray) -> np.ndarray:
+    def calculate_track_points(self, state: np.ndarray) -> np.ndarray:
         """
         Computes the next self.lookahead_index points on the track.
         
@@ -192,7 +199,7 @@ class NeuralODEController(Node):
             track_points (np.ndarray): The next self.lookahead_index points on the track
         """
         closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory - state, axis=0))
-        track_points: np.ndarray = np.zeros((2, self.lookahead_index))
+        track_points: np.ndarray = np.zeros((3, self.lookahead_index))
         for i in range(self.lookahead_index):
             track_points[:, i] = self.nominal_trajectory[:, (closest_index + i) % self.nominal_trajectory.shape[1]]
         return track_points
@@ -282,9 +289,10 @@ class NeuralODEController(Node):
         Returns:
             db_dx (casadi.DM): The gradient of the control barrier function
         """
-        db_dx: casadi.DM = casadi.DM(2, 1)
+        db_dx: casadi.DM = casadi.DM(3, 1)
         db_dx[0] = -2 * (state[0] - self.ellipse_center[0]) / (self.a**2)
         db_dx[1] = -2 * (state[1] - self.ellipse_center[1]) / (self.b**2)
+        db_dx[2] = 0
         return db_dx
 
     def control_lyapunov_function_2d(self, error_state: np.ndarray):
@@ -308,9 +316,10 @@ class NeuralODEController(Node):
         Returns:
             dV_dx (casadi.DM): The gradient of the control lyapunov function
         """
-        dV_dx: casadi.DM = casadi.DM(2, 1)
+        dV_dx: casadi.DM = casadi.DM(3, 1)
         dV_dx[0] = 0.5 * (error_state[0]**2 + error_state[1]**2)**(-0.5) * 2 * error_state[0]
         dV_dx[1] = 0.5 * (error_state[0]**2 + error_state[1]**2)**(-0.5) * 2 * error_state[1]
+        dV_dx[2] = 0
         return dV_dx
     
     def get_yaw_from_quaternion(self, q: Quaternion) -> float:
