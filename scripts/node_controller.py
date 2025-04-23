@@ -30,7 +30,7 @@ class NeuralODEController(Node):
         self.srv = self.create_service(GenerateNominalTrajectory,'generate_nominal_trajectory',self.generate_nominal_trajectory_callback)
         # self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/odom_topic', self.odom_callback, 10)
         self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
-        self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/ackermann_cmd', 10)
+        self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
 
         self.latest_position: Vector3 | None = None
@@ -63,7 +63,7 @@ class NeuralODEController(Node):
 
         # trajectory rollout parameters
         self.dt: float = 0.01
-        self.rollout_length: int = 100
+        self.rollout_length: int = 1000
         self.nominal_trajectory: np.ndarray | None = None
 
         self.get_logger().info('Initialized NODE Controller')
