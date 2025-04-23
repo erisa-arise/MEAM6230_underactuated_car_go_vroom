@@ -167,8 +167,8 @@ class NeuralODEController(Node):
         
         # publish the safe velocitya and steering angle
         ackermann_msg: AckermannDriveStamped = AckermannDriveStamped()
-        ackermann_msg.speed = v_safe
-        ackermann_msg.steering_angle = delta_safe
+        ackermann_msg.drive.speed = v_safe
+        ackermann_msg.drive.steering_angle = delta_safe
         self.ackermann_publisher.publish(ackermann_msg)    
 
     def compute_safe_control(self, state: np.ndarray) -> Tuple[float]:
@@ -194,9 +194,9 @@ class NeuralODEController(Node):
             track_point_velocity: torch.Tensor = self.model(torch.tensor(track_point.T, dtype=torch.float32))
             track_point_xdot: np.ndarray = self.map_n_ode_to_x_dot(track_point_velocity)
             error_state: np.ndarray = state - track_point
-            u_opt, v_opt, delta_opt, epsilon_opt = self.solve_control_optimization(state, error_state, track_point_xdot, state_xdot)
-            residual_control_norm = (u_opt[0][0]/self.v_max)**2 + (u_opt[1][0]/self.v_max)**2 + (u_opt[2][0]/self.delta_max)**2
-            controls.append((v_opt, delta_opt, residual_control_norm))
+            u_opt, control_opt, epsilon_opt = self.solve_control_optimization(state, error_state, track_point_xdot, state_xdot)
+            residual_control_norm = (u_opt[0]/self.v_max)**2 + (u_opt[1]/self.v_max)**2 + (u_opt[2]/self.delta_max)**2
+            controls.append((control_opt[0], control_opt[1], residual_control_norm))
 
         # choose the smallest residual control
         v_safe, delta_safe, residual_control_norm_safe = min(controls, key=lambda x: x[2])
@@ -234,98 +234,53 @@ class NeuralODEController(Node):
         """
         # decision variables
         u: MX = casadi.MX.sym('u', 3, 1)
-        v: MX = casadi.MX.sym('v', 1, 1)
-        delta: MX = casadi.MX.sym('delta', 1, 1)
+        control: MX = casadi.MX.sym('control', 2, 1)
         # slack variable
-        epsilon: MX = casadi.MX.sym('epsilon', 1, 1) 
+        epsilon: MX = casadi.MX.sym('epsilon') 
         
         Q: DM = casadi.diag([1/self.v_max, 1/self.v_max, 1/self.delta_max])
         cost = casadi.mtimes([u.T, Q, u]) + self.lambda_ * epsilon
 
         constraints: List[MX] = []
-        constraint_lower_bound: List[float] = []
-        constraint_upper_bound: List[float] = []
         
-        # Velocity constraints
-        constraints.append(v)
-        constraint_lower_bound.append(-self.v_max)
-        constraint_upper_bound.append(self.v_max)
+        # input limit constriants
+        constraints.append(control)
+        actuation_lower_bound: np.ndarray = np.array([-self.v_max, -self.delta_max])
+        actuation_upper_bound: np.ndarray = np.array([self.v_max, self.delta_max])
 
-        print('======================')
-        print('Constraints:', constraints)
-        print('Lower Bound:', constraint_lower_bound)
-        print('Upper Bound:', constraint_upper_bound)
-
-        # Steering angle constraints
-        constraints.append(delta)
-        constraint_lower_bound.append(-self.delta_max)
-        constraint_upper_bound.append(self.delta_max)
-
-        print('======================')
-        print('Constraints:', constraints)
-        print('Lower Bound:', constraint_lower_bound)
-        print('Upper Bound:', constraint_upper_bound)
-
-        # CLF Constraint
-        constraints.append(casadi.dot(self.control_lyapunov_function_gradient_2d(error_state), state_xdot - track_point_xdot + u))
-        constraint_lower_bound.append(-casadi.inf)
-        constraint_upper_bound.append(-self.alpha*self.control_lyapunov_function_2d(error_state) + epsilon)
-
-        print('======================')
-        print('Constraints:', constraints)
-        print('Lower Bound:', constraint_lower_bound)
-        print('Upper Bound:', constraint_upper_bound)
-
-        # CBF Constraint
+        # CLF and CBF constraint
+        constraints.append(casadi.dot(self.control_lyapunov_function_gradient_2d(error_state), state_xdot - track_point_xdot) - epsilon)
         constraints.append(casadi.dot(self.control_boundary_function_gradient_2d(state), state_xdot + u))
-        constraint_lower_bound.append(-self.gamma*self.control_boundary_function_2d(state))
-        constraint_upper_bound.append(casadi.inf)
-
-        print('======================')
-        print('Constraints:', constraints)
-        print('Lower Bound:', constraint_lower_bound)
-        print('Upper Bound:', constraint_upper_bound)
+        clf_cbf_lower_bound: np.ndarray = np.array([-casadi.inf,
+                                                    -self.gamma*self.control_boundary_function_2d(state)])
+        clf_cbf_upper_bound: np.ndarray = np.array([-self.alpha*self.control_lyapunov_function_2d(error_state),
+                                                    casadi.inf])
 
         # Dynamics Constraint
-        constraints.append(state_xdot[0] + u[0] - v*np.cos(state[2]))
-        constraint_lower_bound.append(0.0)
-        constraint_upper_bound.append(0.0)
-        
-        print('======================')
-        print('Constraints:', constraints)
-        print('Lower Bound:', constraint_lower_bound)
-        print('Upper Bound:', constraint_upper_bound)
-        print('np.cos:', np.cos(state[2]))
-        
-        constraints.append(state_xdot[1] + u[1] - v*np.sin(state[2]))
-        constraint_lower_bound.append(0.0)
-        constraint_upper_bound.append(0.0)
-        
-        print('======================')
-        print('Constraints:', constraints)
-        print('Lower Bound:', constraint_lower_bound)
-        print('Upper Bound:', constraint_upper_bound)
-        
-        constraints.append(state_xdot[2] + u[2] - (v/self.L)*casadi.tan(delta))
-        constraint_lower_bound.append(0.0)
-        constraint_upper_bound.append(0.0)
-
-        print('======================')
-        print('Constraints:', constraints)
-        print('Lower Bound:', constraint_lower_bound)
-        print('Upper Bound:', constraint_upper_bound)
-        
+        constraints.append(state_xdot[0] + u[0] - control[0]*np.cos(state[2]))
+        constraints.append(state_xdot[1] + u[1] - control[0]*np.sin(state[2]))
+        constraints.append(state_xdot[2] + u[2] - (control[0]/self.L)*casadi.tan(control[1]))
+        dynamics_lower_bound: np.ndarray = np.zeros(3)
+        dynamics_upper_bound: np.ndarray = np.zeros(3)
         
         nlp = {
-            'x': casadi.vertcat(casadi.reshape(u, -1, 1), casadi.reshape(v, -1, 1), casadi.reshape(delta, -1, 1), casadi.reshape(epsilon, -1, 1)),
+            'x': casadi.vertcat(casadi.reshape(u, -1, 1), casadi.reshape(control, -1, 1), epsilon),
             'f': cost,                  
             'g': casadi.vertcat(*constraints)  
         }
+        
         solver: Function = casadi.nlpsol('solver','ipopt', nlp)
-        sol = solver(lbg=casadi.vertcat(*constraint_lower_bound), ubg=casadi.vertcat(*constraint_upper_bound), x0=casadi.vertcat([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+        lower_bound = casadi.vertcat(actuation_lower_bound, clf_cbf_lower_bound, dynamics_lower_bound)
+        upper_bound = casadi.vertcat(actuation_upper_bound, clf_cbf_upper_bound, dynamics_upper_bound)
+        x_guess: np.ndarray = np.zeros((6, 1))
+        sol = solver(lbg=lower_bound, ubg=upper_bound, x0=casadi.vertcat(x_guess))
         x_opt = sol['x'].full().flatten()
 
-        # return u_opt, v_opt, delta_opt, epsilon_opt
+        u_opt: np.ndarray = x_opt[0:3]
+        control_opt: np.ndarray = x_opt[3:5]
+        epsilon_opt: float = x_opt[5]
+
+        return u_opt, control_opt, epsilon_opt
     
     def control_boundary_function_2d(self, state: np.ndarray) -> float:
         """
