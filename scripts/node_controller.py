@@ -151,7 +151,7 @@ class NeuralODEController(Node):
             delta_safe (float): The safe steering angle
         """
         # determine the safe control input by scanning across the next self.lookahead_index points on the track
-        track_points: np.ndarray[np.float32] = self.calculate_track_points_2d(state)
+        track_points: np.ndarray[np.float32] = self.calculate_track_points(state)
 
         controls: List[Tuple[float]] = []
         for i in range(self.lookahead_index):
@@ -167,7 +167,7 @@ class NeuralODEController(Node):
 
         return v_safe, delta_safe
     
-    def calculate_track_points_2d(self, state: np.ndarray[np.float32]) -> np.ndarray[np.float32]:
+    def calculate_track_points(self, state: np.ndarray[np.float32]) -> np.ndarray[np.float32]:
         """
         Computes the next self.lookahead_index points on the track.
         
