@@ -8,16 +8,16 @@ import math
 import casadi
 import numpy as np
 
-from casadi import MX, DM, Function
+from casadi import MX, SX, DM, Function
 
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
 
-from geometry_msgs.msg import Quaternion, Vector3
+from geometry_msgs.msg import Quaternion, Vector3, PoseStamped
 from ackermann_msgs.msg import AckermannDriveStamped
 from mocap4r2_msgs.msg import RigidBodies
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, Path
 
 from reactive_car.srv import GenerateNominalTrajectory
 from utils.n_ode import N_ODE
@@ -31,8 +31,9 @@ class NeuralODEController(Node):
         # self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/odom_topic', self.odom_callback, 10)
         self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/ackermann_cmd', 10)
+        self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
 
-        self.latest_position: np.ndarray | None = None
+        self.latest_position: Vector3 | None = None
         self.latest_quaternion: Quaternion | None = None
 
         # load the neural ODE model here
@@ -62,7 +63,7 @@ class NeuralODEController(Node):
 
         # trajectory rollout parameters
         self.dt: float = 0.05
-        self.rollout_length: int = 100
+        self.rollout_length: int = 1000
         self.nominal_trajectory: np.ndarray | None = None
 
         self.get_logger().info('Initialized NODE Controller')
@@ -72,8 +73,7 @@ class NeuralODEController(Node):
         Callback function for the GenerateNominalTrajectory service. Generates a nominal trajectory 
         using the neural ODE model.
         """
-        state_0: np.ndarray = np.array([[self.latest_position.x, self.latest_position.y,
-                                        self.get_yaw_from_quaternion(self.latest_quaternion)]])
+        state_0: np.ndarray = np.array([[self.latest_position.x, self.latest_position.y, self.get_yaw_from_quaternion(self.latest_quaternion)]]).T
         self.get_logger().info(f'Generating nominal trajectory with initial state: {state_0}')
         self.rollout_nominal_trajectory(state_0)
 
@@ -93,13 +93,32 @@ class NeuralODEController(Node):
         """
         self.nominal_trajectory = np.zeros((3, self.rollout_length), dtype=np.float32)
 
-        current_state: torch.Tensor = torch.tensor(state_0, dtype=torch.float32)
+        current_state: torch.Tensor = torch.tensor(state_0.T, dtype=torch.float32)
         for i in range(self.rollout_length):
             with torch.no_grad():
                 n_ode_output: torch.Tensor = self.model(current_state)
             x_dot: np.ndarray = self.map_n_ode_to_x_dot(n_ode_output)
-            current_state = (current_state + x_dot * self.dt).float()
+            current_state = (current_state + x_dot.T * self.dt).float()
             self.nominal_trajectory[:, i] = current_state.squeeze().numpy()
+
+        # publish nominal trajectory
+        path_msg: Path = Path()
+        path_msg.header.frame_id = 'map'
+        path_msg.header.stamp = self.get_clock().now().to_msg()
+        for i in range(self.rollout_length):
+            pose: PoseStamped = PoseStamped()
+            pose.header.frame_id = 'map'
+            pose.header.stamp = self.get_clock().now().to_msg()
+            pose.pose.position.x = float(self.nominal_trajectory[0, i])
+            pose.pose.position.y = float(self.nominal_trajectory[1, i])
+            pose.pose.position.z = 0.0
+            pose.pose.orientation.x = 0.0
+            pose.pose.orientation.y = 0.0
+            pose.pose.orientation.z = 0.0
+            pose.pose.orientation.w = 1.0
+            path_msg.poses.append(pose)
+        self.nominal_trajectory_publisher.publish(path_msg)
+        self.get_logger().info('Published nominal trajectory')
 
     def map_n_ode_to_x_dot(self, n_ode_output: torch.Tensor) -> np.ndarray:
         """
@@ -112,7 +131,7 @@ class NeuralODEController(Node):
         """
         v: float = n_ode_output[0][0].item()
         delta: float = n_ode_output[0][1].item()
-        x_dot: np.ndarray = np.array([v * math.cos(delta), v * math.sin(delta), v/self.L * math.tan(delta)])
+        x_dot: np.ndarray = np.array([[v * math.cos(delta), v * math.sin(delta), v/self.L * math.tan(delta)]]).T
         return x_dot
 
     def odom_callback(self, msg: RigidBodies) -> None:
@@ -175,13 +194,8 @@ class NeuralODEController(Node):
             track_point_velocity: torch.Tensor = self.model(torch.tensor(track_point.T, dtype=torch.float32))
             track_point_xdot: np.ndarray = self.map_n_ode_to_x_dot(track_point_velocity)
             error_state: np.ndarray = state - track_point
-            v_opt, delta_opt = self.solve_control_optimization(state, error_state, track_point_xdot, state_xdot)
-            residual_control: np.ndarray = np.array([[v_opt * np.cos(state[2])],
-                                                    [v_opt*np.sin(state[2])],
-                                                    v_opt/self.L*np.tan(delta_opt)]) - state_xdot 
-            residual_control_norm = ((residual_control[0]/self.v_max)**2 + 
-                                    (residual_control[1]/self.v_max)**2 + 
-                                    (residual_control[2]/self.delta_max)**2)**0.5
+            u_opt, v_opt, delta_opt, epsilon_opt = self.solve_control_optimization(state, error_state, track_point_xdot, state_xdot)
+            residual_control_norm = (u_opt[0][0]/self.v_max)**2 + (u_opt[1][0]/self.v_max)**2 + (u_opt[2][0]/self.delta_max)**2
             controls.append((v_opt, delta_opt, residual_control_norm))
 
         # choose the smallest residual control
@@ -220,56 +234,100 @@ class NeuralODEController(Node):
         """
         # decision variables
         u: MX = casadi.MX.sym('u', 3, 1)
-        v: MX = casadi.MX.sym('v')
-        delta: MX = casadi.MX.sym('delta')
+        v: MX = casadi.MX.sym('v', 1, 1)
+        delta: MX = casadi.MX.sym('delta', 1, 1)
         # slack variable
-        epsilon: MX = casadi.MX.sym('epsilon') 
+        epsilon: MX = casadi.MX.sym('epsilon', 1, 1) 
         
-        Q: DM = casadi.diag(casadi.vertcat(1/self.v_max, 1/self.v_max, 1/self.delta_max))
+        Q: DM = casadi.diag([1/self.v_max, 1/self.v_max, 1/self.delta_max])
         cost = casadi.mtimes([u.T, Q, u]) + self.lambda_ * epsilon
 
         constraints: List[MX] = []
         constraint_lower_bound: List[float] = []
         constraint_upper_bound: List[float] = []
         
+        # Velocity constraints
+        constraints.append(v)
+        constraint_lower_bound.append(-self.v_max)
+        constraint_upper_bound.append(self.v_max)
+
+        print('======================')
+        print('Constraints:', constraints)
+        print('Lower Bound:', constraint_lower_bound)
+        print('Upper Bound:', constraint_upper_bound)
+
         # Steering angle constraints
         constraints.append(delta)
-        constraint_lower_bound.append(self.delta_max)
-        constraint_upper_bound.append(-self.delta_max)
+        constraint_lower_bound.append(-self.delta_max)
+        constraint_upper_bound.append(self.delta_max)
+
+        print('======================')
+        print('Constraints:', constraints)
+        print('Lower Bound:', constraint_lower_bound)
+        print('Upper Bound:', constraint_upper_bound)
 
         # CLF Constraint
-        constraints.append(self.control_lyapunov_function_gradient_2d(error_state).T @ state_xdot - track_point_xdot + u) 
+        constraints.append(casadi.dot(self.control_lyapunov_function_gradient_2d(error_state), state_xdot - track_point_xdot + u))
         constraint_lower_bound.append(-casadi.inf)
-        constraint_upper_bound.append(-self.alpha*self.control_lyapunov_function_2d(error_state)+epsilon)
+        constraint_upper_bound.append(-self.alpha*self.control_lyapunov_function_2d(error_state) + epsilon)
+
+        print('======================')
+        print('Constraints:', constraints)
+        print('Lower Bound:', constraint_lower_bound)
+        print('Upper Bound:', constraint_upper_bound)
 
         # CBF Constraint
-        constraints.append(self.control_boundary_function_gradient_2d(state).T @ state_xdot + u)
+        constraints.append(casadi.dot(self.control_boundary_function_gradient_2d(state), state_xdot + u))
         constraint_lower_bound.append(-self.gamma*self.control_boundary_function_2d(state))
         constraint_upper_bound.append(casadi.inf)
 
+        print('======================')
+        print('Constraints:', constraints)
+        print('Lower Bound:', constraint_lower_bound)
+        print('Upper Bound:', constraint_upper_bound)
+
         # Dynamics Constraint
         constraints.append(state_xdot[0] + u[0] - v*np.cos(state[2]))
-        constraint_lower_bound.append(0)
-        constraint_upper_bound.append(0)
+        constraint_lower_bound.append(0.0)
+        constraint_upper_bound.append(0.0)
+        
+        print('======================')
+        print('Constraints:', constraints)
+        print('Lower Bound:', constraint_lower_bound)
+        print('Upper Bound:', constraint_upper_bound)
+        print('np.cos:', np.cos(state[2]))
+        
         constraints.append(state_xdot[1] + u[1] - v*np.sin(state[2]))
-        constraint_lower_bound.append(0)
-        constraint_upper_bound.append(0)
+        constraint_lower_bound.append(0.0)
+        constraint_upper_bound.append(0.0)
+        
+        print('======================')
+        print('Constraints:', constraints)
+        print('Lower Bound:', constraint_lower_bound)
+        print('Upper Bound:', constraint_upper_bound)
+        
         constraints.append(state_xdot[2] + u[2] - (v/self.L)*casadi.tan(delta))
-        constraint_lower_bound.append(0)
-        constraint_upper_bound.append(0)
+        constraint_lower_bound.append(0.0)
+        constraint_upper_bound.append(0.0)
+
+        print('======================')
+        print('Constraints:', constraints)
+        print('Lower Bound:', constraint_lower_bound)
+        print('Upper Bound:', constraint_upper_bound)
+        
         
         nlp = {
-            'x': casadi.vertcat(u, v, delta, epsilon),   
+            'x': casadi.vertcat(casadi.reshape(u, -1, 1), casadi.reshape(v, -1, 1), casadi.reshape(delta, -1, 1), casadi.reshape(epsilon, -1, 1)),
             'f': cost,                  
-            'g': constraints  
+            'g': casadi.vertcat(*constraints)  
         }
-        solver: Function = casadi.nlpsol('vroom vroom','ipopt',nlp)
-        ans = solver(lbg=constraint_lower_bound, ubg=constraint_upper_bound)
-        v_opt = ans['v']
-        delta_opt = ans['delta']
-        return v_opt, delta_opt
+        solver: Function = casadi.nlpsol('solver','ipopt', nlp)
+        sol = solver(lbg=casadi.vertcat(*constraint_lower_bound), ubg=casadi.vertcat(*constraint_upper_bound), x0=casadi.vertcat([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+        x_opt = sol['x'].full().flatten()
+
+        # return u_opt, v_opt, delta_opt, epsilon_opt
     
-    def control_boundary_function_2d(self, state: np.ndarray) -> np.ndarray:
+    def control_boundary_function_2d(self, state: np.ndarray) -> float:
         """
         Computes the control barrier function.
         
@@ -278,9 +336,7 @@ class NeuralODEController(Node):
         Returns:
             b_x (np.ndarray): The control barrier function
         """
-        b_x: np.ndarray = 1 - np.array([[
-            ((state[0] - self.ellipse_center[0]) / self.a)**2,
-            ((state[1] - self.ellipse_center[1]) / self.b)**2]])
+        b_x: float = 1 - ((state[0] - self.ellipse_center[0]) / self.a)**2 - ((state[1] - self.ellipse_center[1]) / self.b)**2
         return b_x
 
     def control_boundary_function_gradient_2d(self, state: np.ndarray) -> casadi.DM:
