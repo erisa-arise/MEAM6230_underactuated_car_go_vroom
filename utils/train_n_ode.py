@@ -50,6 +50,8 @@ def train(ds, epochs=10, batch_size = 32):
     plt.ylabel("Loss")
     plt.yscale('log')
     plt.show()
+
+    return model
     
     
 
@@ -60,4 +62,8 @@ if __name__ == "__main__":
 
     ds = node_dataset(x_path, y_path)
 
-    train(ds)
+    model = train(ds)
+
+    save_dir = f"{filepath}"
+    os.makedirs(save_dir, exist_ok=True)
+    torch.save(model.state_dict(), os.path.join(save_dir, "n_ode_model.pth"))
