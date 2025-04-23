@@ -18,6 +18,7 @@ from geometry_msgs.msg import Quaternion, Vector3, PoseStamped
 from ackermann_msgs.msg import AckermannDriveStamped
 from mocap4r2_msgs.msg import RigidBodies
 from nav_msgs.msg import Odometry, Path
+from visualization_msgs.msg import Marker
 
 from reactive_car.srv import GenerateNominalTrajectory
 from utils.n_ode import N_ODE
@@ -32,6 +33,7 @@ class NeuralODEController(Node):
         self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
+        self.track_point_publisher: Publisher = self.create_publisher(Marker, '/track_point', 10)
 
         self.latest_position: Vector3 | None = None
         self.latest_quaternion: Quaternion | None = None
@@ -59,10 +61,10 @@ class NeuralODEController(Node):
 
         # control lyapunov function parameters
         self.alpha: float = 1.0
-        self.lookahead_index: int = 5
+        self.lookahead_index: int = 20
 
         # trajectory rollout parameters
-        self.dt: float = 0.01
+        self.dt: float = 0.05
         self.rollout_length: int = 1000
         self.nominal_trajectory: np.ndarray | None = None
 
@@ -199,7 +201,32 @@ class NeuralODEController(Node):
             controls.append((control_opt[0], control_opt[1], residual_control_norm))
 
         # choose the smallest residual control
-        v_safe, delta_safe, residual_control_norm_safe = min(controls, key=lambda x: x[2])
+        min_index = np.argmin([control[2] for control in controls])
+        v_safe, delta_safe, residual_control_norm_safe = controls[min_index]
+
+        # visualize the trackpoint
+        marker: Marker = Marker()
+        marker.header.frame_id = 'map'
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = 'track_point'
+        marker.id = 0
+        marker.type = Marker.SPHERE
+        marker.action = Marker.ADD
+        marker.pose.position.x = float(track_points[0, min_index])
+        marker.pose.position.y = float(track_points[1, min_index])
+        marker.pose.position.z = 0.0
+        marker.pose.orientation.x = 0.0
+        marker.pose.orientation.y = 0.0
+        marker.pose.orientation.z = 0.0
+        marker.pose.orientation.w = 1.0
+        marker.scale.x = 0.1
+        marker.scale.y = 0.1
+        marker.scale.z = 0.1
+        marker.color.r = 1.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0
+        marker.color.a = 1.0
+        self.track_point_publisher.publish(marker)
 
         return v_safe, delta_safe
     
@@ -245,7 +272,7 @@ class NeuralODEController(Node):
         
         # input limit constriants
         constraints.append(control)
-        actuation_lower_bound: np.ndarray = np.array([-self.v_max, -self.delta_max])
+        actuation_lower_bound: np.ndarray = np.array([-0.2, -self.delta_max])
         actuation_upper_bound: np.ndarray = np.array([self.v_max, self.delta_max])
 
         # CLF and CBF constraint

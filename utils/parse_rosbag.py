@@ -110,3 +110,4 @@ if __name__ == "__main__":
     np.save(out_control_path, control_history)
 
     visualize_state_history(state_history)
+    visualize_control_history(control_history)
