@@ -17,7 +17,7 @@ class node_dataset(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.Y[idx]
 
-def train(ds, epochs=10, batch_size = 32):
+def train(ds, epochs=20, batch_size = 32):
     dataloader = DataLoader(ds, batch_size=batch_size, shuffle=True)
     model = N_ODE()
     optim = torch.optim.Adam(model.parameters(), lr=0.003)
@@ -57,8 +57,8 @@ def train(ds, epochs=10, batch_size = 32):
 
 if __name__ == "__main__":
     filepath = os.path.dirname(os.path.abspath(__file__))
-    x_path = f"{filepath}/../data/state_history.npy"
-    y_path = f"{filepath}/../data/control_history.npy"
+    x_path = f"{filepath}/../data/latest_sim_teleop_data/state_history.npy"
+    y_path = f"{filepath}/../data/latest_sim_teleop_data/control_history.npy"
 
     ds = node_dataset(x_path, y_path)
 

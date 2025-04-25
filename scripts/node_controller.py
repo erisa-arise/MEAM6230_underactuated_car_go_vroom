@@ -40,7 +40,8 @@ class NeuralODEController(Node):
 
         # load the neural ODE model here
         self.file_path = os.path.dirname(os.path.abspath(__file__))
-        model_path = os.path.join(self.file_path, 'utils', 'n_ode_model.pth')
+        #model_path = os.path.join(self.file_path, 'utils', 'n_ode_model_real.pth')
+        model_path = os.path.join(self.file_path, 'utils', 'n_ode_model_sim.pth')
         self.model: N_ODE = N_ODE()
         self.model.load_state_dict(torch.load(model_path))  
         self.model.eval()
@@ -99,7 +100,7 @@ class NeuralODEController(Node):
         for i in range(self.rollout_length):
             with torch.no_grad():
                 n_ode_output: torch.Tensor = self.model(current_state)
-            x_dot: np.ndarray = self.map_n_ode_to_x_dot(n_ode_output)
+            x_dot: np.ndarray = self.map_n_ode_to_x_dot(n_ode_output, current_state)
             current_state = (current_state + x_dot.T * self.dt).float()
             self.nominal_trajectory[:, i] = current_state.squeeze().numpy()
 
@@ -122,7 +123,7 @@ class NeuralODEController(Node):
         self.nominal_trajectory_publisher.publish(path_msg)
         self.get_logger().info('Published nominal trajectory')
 
-    def map_n_ode_to_x_dot(self, n_ode_output: torch.Tensor) -> np.ndarray:
+    def map_n_ode_to_x_dot(self, n_ode_output: torch.Tensor, x: torch.Tensor) -> np.ndarray:
         """
         Converts the Neural ODE output to x_dot using the car dynamics model.
 
@@ -131,9 +132,10 @@ class NeuralODEController(Node):
         Returns:
             x_dot (np.ndarray): The x_dot vector in the form [x_dot, y_dot, theta_dot]
         """
-        v: float = n_ode_output[0][0].item()
+        v: float = 1.0 #n_ode_output[0][0].item()
         delta: float = n_ode_output[0][1].item()
-        x_dot: np.ndarray = np.array([[v * math.cos(delta), v * math.sin(delta), v/self.L * math.tan(delta)]]).T
+        curr_heading = x[0,2]
+        x_dot: np.ndarray = np.array([[v * math.cos(curr_heading), v * math.sin(curr_heading), (v/self.L) * math.tan(delta)]]).T
         return x_dot
 
     def odom_callback(self, msg: RigidBodies) -> None:
@@ -188,13 +190,14 @@ class NeuralODEController(Node):
 
         state_tensor: torch.Tensor = torch.tensor(state.T, dtype=torch.float32)
         n_ode_output = self.model(state_tensor)
-        state_xdot: np.ndarray = self.map_n_ode_to_x_dot(n_ode_output)
+        state_xdot: np.ndarray = self.map_n_ode_to_x_dot(n_ode_output, state_tensor)
 
         controls: List[Tuple[float]] = []
         for i in range(self.lookahead_index):
             track_point = track_points[:, i:i+1]
-            track_point_velocity: torch.Tensor = self.model(torch.tensor(track_point.T, dtype=torch.float32))
-            track_point_xdot: np.ndarray = self.map_n_ode_to_x_dot(track_point_velocity)
+            track_point_tensor = torch.tensor(track_point.T, dtype=torch.float32)
+            track_point_velocity: torch.Tensor = self.model(track_point_tensor)
+            track_point_xdot: np.ndarray = self.map_n_ode_to_x_dot(track_point_velocity, track_point_tensor)
             error_state: np.ndarray = state - track_point
             u_opt, control_opt, epsilon_opt = self.solve_control_optimization(state, error_state, track_point_xdot, state_xdot)
             residual_control_norm = (u_opt[0]/self.v_max)**2 + (u_opt[1]/self.v_max)**2 + (u_opt[2]/self.delta_max)**2

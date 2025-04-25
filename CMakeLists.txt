@@ -24,6 +24,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 
 install(PROGRAMS
   scripts/node_controller.py
+  data/publish_data_path.py
+  scripts/teleop_recorder.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
