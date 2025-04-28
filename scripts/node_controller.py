@@ -62,11 +62,11 @@ class NeuralODEController(Node):
 
         # control lyapunov function parameters
         self.alpha: float = 1.0
-        self.lookahead_index: int = 20
+        self.lookahead_index: int = 100
 
         # trajectory rollout parameters
         self.dt: float = 0.05
-        self.rollout_length: int = 1000
+        self.rollout_length: int = 580
         self.nominal_trajectory: np.ndarray | None = None
 
         self.get_logger().info('Initialized NODE Controller')
@@ -134,7 +134,7 @@ class NeuralODEController(Node):
         """
         v: float = 1.0 #n_ode_output[0][0].item()
         delta: float = n_ode_output[0][1].item()
-        curr_heading = x[0,2]
+        curr_heading = x[0, 2]
         x_dot: np.ndarray = np.array([[v * math.cos(curr_heading), v * math.sin(curr_heading), (v/self.L) * math.tan(delta)]]).T
         return x_dot
 
@@ -167,12 +167,12 @@ class NeuralODEController(Node):
         state: np.ndarray = np.array([[self.latest_position.x, self.latest_position.y, yaw]]).T
 
         # compute the safe control
-        v_safe, delta_safe = self.compute_safe_control(state) 
+        u_safe, control_safe = self.compute_safe_control(state) 
         
         # publish the safe velocity and steering angle
         ackermann_msg: AckermannDriveStamped = AckermannDriveStamped()
-        ackermann_msg.drive.speed = v_safe
-        ackermann_msg.drive.steering_angle = delta_safe
+        ackermann_msg.drive.speed = control_safe[0]
+        ackermann_msg.drive.steering_angle = control_safe[1]
         self.ackermann_publisher.publish(ackermann_msg)    
 
     def compute_safe_control(self, state: np.ndarray) -> Tuple[float]:
@@ -192,23 +192,28 @@ class NeuralODEController(Node):
         n_ode_output = self.model(state_tensor)
         state_xdot: np.ndarray = self.map_n_ode_to_x_dot(n_ode_output, state_tensor)
 
-        print("Boutta find controls")
         controls: List[Tuple[float]] = []
-        for i in range(self.lookahead_index):
+        for i in range(50, 51):
             track_point = track_points[:, i:i+1]
             track_point_tensor = torch.tensor(track_point.T, dtype=torch.float32)
             track_point_velocity: torch.Tensor = self.model(track_point_tensor)
             track_point_xdot: np.ndarray = self.map_n_ode_to_x_dot(track_point_velocity, track_point_tensor)
             error_state: np.ndarray = state - track_point
             u_opt, control_opt, epsilon_opt = self.solve_control_optimization(state, error_state, track_point_xdot, state_xdot)
-            print("u_opt", u_opt, "control_opt", control_opt, "epsilon_opt", epsilon_opt)
             residual_control_norm = (u_opt[0]/self.v_max)**2 + (u_opt[1]/self.v_max)**2 + (u_opt[2]/self.delta_max)**2
-            controls.append((control_opt[0], control_opt[1], residual_control_norm))
-        print("Found controls")
+            controls.append((u_opt, control_opt, residual_control_norm))
 
         # choose the smallest residual control
         min_index = np.argmin([control[2] for control in controls])
-        v_safe, delta_safe, residual_control_norm_safe = controls[min_index]
+        u_safe, control_safe, residual_control_norm_safe = controls[min_index]
+
+        self.get_logger().warn("Found controls")
+        self.get_logger().warn(f"min_index: {50}")
+        self.get_logger().warn(f"n_ode_output: {n_ode_output}")
+        self.get_logger().warn(f"state_xdot: {state_xdot}")
+        self.get_logger().warn(f"u_safe: {u_safe}")
+        self.get_logger().warn(f"control_safe: {control_safe}")
+        self.get_logger().warn('========================')
 
         # visualize the trackpoint
         marker: Marker = Marker()
@@ -218,8 +223,8 @@ class NeuralODEController(Node):
         marker.id = 0
         marker.type = Marker.SPHERE
         marker.action = Marker.ADD
-        marker.pose.position.x = float(track_points[0, min_index])
-        marker.pose.position.y = float(track_points[1, min_index])
+        marker.pose.position.x = float(track_points[0, 50])
+        marker.pose.position.y = float(track_points[1, 50])
         marker.pose.position.z = 0.0
         marker.pose.orientation.x = 0.0
         marker.pose.orientation.y = 0.0
@@ -234,7 +239,7 @@ class NeuralODEController(Node):
         marker.color.a = 1.0
         self.track_point_publisher.publish(marker)
 
-        return v_safe, delta_safe
+        return u_safe, control_safe
     
     def calculate_track_points(self, state: np.ndarray) -> np.ndarray:
         """
@@ -245,7 +250,7 @@ class NeuralODEController(Node):
         Returns:
             track_points (np.ndarray): The next self.lookahead_index points on the track
         """
-        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory[:, :2] - state[:, :2], axis=0)) #only do x, y bc angles dont have same scale and wrap around could cause issues
+        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory[:2, :] - state[:2, :], axis=0)) #only do x, y bc angles dont have same scale and wrap around could cause issues
         track_points: np.ndarray = np.zeros((3, self.lookahead_index))
         for i in range(self.lookahead_index):
             track_points[:, i] = self.nominal_trajectory[:, (closest_index + i) % self.nominal_trajectory.shape[1]]
@@ -282,7 +287,7 @@ class NeuralODEController(Node):
         actuation_upper_bound: np.ndarray = np.array([self.v_max, self.delta_max])
 
         # CLF and CBF constraint
-        constraints.append(casadi.dot(self.control_lyapunov_function_gradient_2d(error_state), state_xdot - track_point_xdot) - epsilon)
+        constraints.append(casadi.dot(self.control_lyapunov_function_gradient_2d(error_state), state_xdot - track_point_xdot + u) - epsilon)
         constraints.append(casadi.dot(self.control_boundary_function_gradient_2d(state), state_xdot + u))
         clf_cbf_lower_bound: np.ndarray = np.array([-casadi.inf,
                                                     -self.gamma*self.control_boundary_function_2d(state)])

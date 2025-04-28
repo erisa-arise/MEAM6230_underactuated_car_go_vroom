@@ -42,7 +42,7 @@ class TrajectoryPublisher(Node):
 def main(args=None):
     rclpy.init(args=args)
 
-    path_to_npy = "/home/ubuntu/MEAM6230/final_proj/src/MEAM6230_Underactuated_ODE/data/latest_sim_teleop_data/state_history.npy"
+    path_to_npy = "/home/frankgon/ros2_ws/src/reactive_car/data/latest_sim_teleop_data/state_history.npy"
     trajectory_publisher = TrajectoryPublisher(path_to_npy)
 
     rclpy.spin(trajectory_publisher)
