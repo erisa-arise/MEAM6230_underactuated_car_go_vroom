@@ -14,7 +14,7 @@ from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
 
-from geometry_msgs.msg import Quaternion, Vector3, PoseStamped
+from geometry_msgs.msg import Quaternion, Vector3, PoseStamped, Point
 from ackermann_msgs.msg import AckermannDriveStamped
 from mocap4r2_msgs.msg import RigidBodies
 from nav_msgs.msg import Odometry, Path
@@ -34,6 +34,8 @@ class NeuralODEController(Node):
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
         self.track_point_publisher: Publisher = self.create_publisher(Marker, '/track_point', 10)
+        self.ellipse_publisher: Publisher = self.create_publisher(Marker, '/ellipse_marker', 10)
+        self.create_timer(1.0, self.publish_ellipse)
 
         self.latest_position: Vector3 | None = None
         self.latest_quaternion: Quaternion | None = None
@@ -65,7 +67,7 @@ class NeuralODEController(Node):
 
         # trajectory rollout parameters
         self.dt: float = 0.05
-        self.rollout_length: int = 1000
+        self.rollout_length: int = 100
         self.nominal_trajectory: np.ndarray | None = None
 
         self.get_logger().info('Initialized NODE Controller')
@@ -166,6 +168,9 @@ class NeuralODEController(Node):
 
         # compute the safe control
         v_safe, delta_safe = self.compute_safe_control(state) 
+        # node_ouptput = self.model(torch.tensor(state.T, dtype=torch.float32))
+        # v_safe: float = node_ouptput[0][0].item()
+        # delta_safe: float = node_ouptput[0][1].item()
         
         # publish the safe velocitya and steering angle
         ackermann_msg: AckermannDriveStamped = AckermannDriveStamped()
@@ -375,6 +380,36 @@ class NeuralODEController(Node):
         siny_cosp: float = 2 * (q.w * q.z + q.x * q.y)
         cosy_cosp: float = 1 - 2 * (q.y * q.y + q.z * q.z)
         return math.atan2(siny_cosp, cosy_cosp)
+    
+    def publish_ellipse(self):
+        marker = Marker()
+        marker.header.frame_id = "map"
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = "ellipse"
+        marker.id = 0
+        marker.type = Marker.LINE_STRIP
+        marker.action = Marker.ADD
+        marker.scale.x = 0.05  # Line width
+        marker.color.a = 1.0
+        marker.color.r = 0.0
+        marker.color.g = 1.0
+        marker.color.b = 0.0
+
+        center_x, center_y = self.ellipse_center
+        a, b = self.a, self.b
+
+        for theta in np.linspace(0, 2 * math.pi, 100):
+            x = center_x + a * math.cos(theta)
+            y = center_y + b * math.sin(theta)
+
+            point = Point()
+            point.x = x
+            point.y = y
+            point.z = 0.0
+            marker.points.append(point)
+
+        self.ellipse_publisher.publish(marker)
+
 
 def main(args=None):
     rclpy.init(args=args)
