@@ -169,7 +169,7 @@ class NeuralODEController(Node):
         # compute the safe control
         v_safe, delta_safe = self.compute_safe_control(state) 
         
-        # publish the safe velocitya and steering angle
+        # publish the safe velocity and steering angle
         ackermann_msg: AckermannDriveStamped = AckermannDriveStamped()
         ackermann_msg.drive.speed = v_safe
         ackermann_msg.drive.steering_angle = delta_safe
@@ -192,6 +192,7 @@ class NeuralODEController(Node):
         n_ode_output = self.model(state_tensor)
         state_xdot: np.ndarray = self.map_n_ode_to_x_dot(n_ode_output, state_tensor)
 
+        print("Boutta find controls")
         controls: List[Tuple[float]] = []
         for i in range(self.lookahead_index):
             track_point = track_points[:, i:i+1]
@@ -200,8 +201,10 @@ class NeuralODEController(Node):
             track_point_xdot: np.ndarray = self.map_n_ode_to_x_dot(track_point_velocity, track_point_tensor)
             error_state: np.ndarray = state - track_point
             u_opt, control_opt, epsilon_opt = self.solve_control_optimization(state, error_state, track_point_xdot, state_xdot)
+            print("u_opt", u_opt, "control_opt", control_opt, "epsilon_opt", epsilon_opt)
             residual_control_norm = (u_opt[0]/self.v_max)**2 + (u_opt[1]/self.v_max)**2 + (u_opt[2]/self.delta_max)**2
             controls.append((control_opt[0], control_opt[1], residual_control_norm))
+        print("Found controls")
 
         # choose the smallest residual control
         min_index = np.argmin([control[2] for control in controls])
@@ -242,7 +245,7 @@ class NeuralODEController(Node):
         Returns:
             track_points (np.ndarray): The next self.lookahead_index points on the track
         """
-        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory - state, axis=0))
+        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory[:, :2] - state[:, :2], axis=0)) #only do x, y bc angles dont have same scale and wrap around could cause issues
         track_points: np.ndarray = np.zeros((3, self.lookahead_index))
         for i in range(self.lookahead_index):
             track_points[:, i] = self.nominal_trajectory[:, (closest_index + i) % self.nominal_trajectory.shape[1]]
