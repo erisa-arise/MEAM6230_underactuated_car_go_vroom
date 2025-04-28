@@ -42,7 +42,7 @@ class NeuralODEController(Node):
 
         # load the neural ODE model here
         self.file_path = os.path.dirname(os.path.abspath(__file__))
-        model_path = os.path.join(self.file_path, 'utils', 'n_ode_model.pth')
+        model_path = os.path.join(self.file_path, 'utils', 'n_ode_model_sim.pth')
         self.model: N_ODE = N_ODE()
         self.model.load_state_dict(torch.load(model_path))  
         self.model.eval()
@@ -56,10 +56,10 @@ class NeuralODEController(Node):
         self.lambda_: float = 1.0         
         
         # control barrier function parameters
-        self.a: float = 3.5
-        self.b: float = 2.5
+        self.a: float = 6.0
+        self.b: float = 5.0
         self.gamma: float = 1.0
-        self.ellipse_center: Tuple[float, float] = (0.5, 0.0)
+        self.ellipse_center: Tuple[float, float] = (-1.0, -1.0)
 
         # control lyapunov function parameters
         self.alpha: float = 1.0
@@ -67,7 +67,7 @@ class NeuralODEController(Node):
 
         # trajectory rollout parameters
         self.dt: float = 0.05
-        self.rollout_length: int = 100
+        self.rollout_length: int = 600
         self.nominal_trajectory: np.ndarray | None = None
 
         self.get_logger().info('Initialized NODE Controller')
@@ -101,7 +101,7 @@ class NeuralODEController(Node):
         for i in range(self.rollout_length):
             with torch.no_grad():
                 n_ode_output: torch.Tensor = self.model(current_state)
-            x_dot: np.ndarray = self.map_n_ode_to_x_dot(n_ode_output)
+            x_dot: np.ndarray = self.map_n_ode_to_x_dot(n_ode_output, current_state)
             current_state = (current_state + x_dot.T * self.dt).float()
             self.nominal_trajectory[:, i] = current_state.squeeze().numpy()
 
@@ -124,7 +124,7 @@ class NeuralODEController(Node):
         self.nominal_trajectory_publisher.publish(path_msg)
         self.get_logger().info('Published nominal trajectory')
 
-    def map_n_ode_to_x_dot(self, n_ode_output: torch.Tensor) -> np.ndarray:
+    def map_n_ode_to_x_dot(self, n_ode_output: torch.Tensor, x: torch.Tensor) -> np.ndarray:
         """
         Converts the Neural ODE output to x_dot using the car dynamics model.
 
@@ -135,7 +135,8 @@ class NeuralODEController(Node):
         """
         v: float = n_ode_output[0][0].item()
         delta: float = n_ode_output[0][1].item()
-        x_dot: np.ndarray = np.array([[v * math.cos(delta), v * math.sin(delta), v/self.L * math.tan(delta)]]).T
+        curr_heading = x[0, 2]
+        x_dot: np.ndarray = np.array([[v * math.cos(curr_heading), v * math.sin(curr_heading), (v/self.L) * math.tan(delta)]]).T
         return x_dot
 
     def odom_callback(self, msg: RigidBodies) -> None:
@@ -167,15 +168,12 @@ class NeuralODEController(Node):
         state: np.ndarray = np.array([[self.latest_position.x, self.latest_position.y, yaw]]).T
 
         # compute the safe control
-        v_safe, delta_safe = self.compute_safe_control(state) 
-        # node_ouptput = self.model(torch.tensor(state.T, dtype=torch.float32))
-        # v_safe: float = node_ouptput[0][0].item()
-        # delta_safe: float = node_ouptput[0][1].item()
+        u_safe, control_safe = self.compute_safe_control(state) 
         
-        # publish the safe velocitya and steering angle
+        # publish the safe velocity and steering angle
         ackermann_msg: AckermannDriveStamped = AckermannDriveStamped()
-        ackermann_msg.drive.speed = v_safe
-        ackermann_msg.drive.steering_angle = delta_safe
+        ackermann_msg.drive.speed = control_safe[0]
+        ackermann_msg.drive.steering_angle = control_safe[1]
         self.ackermann_publisher.publish(ackermann_msg)    
 
     def compute_safe_control(self, state: np.ndarray) -> Tuple[float]:
@@ -193,21 +191,23 @@ class NeuralODEController(Node):
 
         state_tensor: torch.Tensor = torch.tensor(state.T, dtype=torch.float32)
         n_ode_output = self.model(state_tensor)
-        state_xdot: np.ndarray = self.map_n_ode_to_x_dot(n_ode_output)
+        state_xdot: np.ndarray = self.map_n_ode_to_x_dot(n_ode_output, state_tensor)
 
         controls: List[Tuple[float]] = []
         for i in range(self.lookahead_index):
             track_point = track_points[:, i:i+1]
-            track_point_velocity: torch.Tensor = self.model(torch.tensor(track_point.T, dtype=torch.float32))
-            track_point_xdot: np.ndarray = self.map_n_ode_to_x_dot(track_point_velocity)
+            track_point_tensor = torch.tensor(track_point.T, dtype=torch.float32)
+            track_point_velocity: torch.Tensor = self.model(track_point_tensor)
+            track_point_xdot: np.ndarray = self.map_n_ode_to_x_dot(track_point_velocity, track_point_tensor)
             error_state: np.ndarray = state - track_point
             u_opt, control_opt, epsilon_opt = self.solve_control_optimization(state, error_state, track_point_xdot, state_xdot)
             residual_control_norm = (u_opt[0]/self.v_max)**2 + (u_opt[1]/self.v_max)**2 + (u_opt[2]/self.delta_max)**2
-            controls.append((control_opt[0], control_opt[1], residual_control_norm))
+            controls.append((u_opt, control_opt, residual_control_norm))
 
         # choose the smallest residual control
         min_index = np.argmin([control[2] for control in controls])
-        v_safe, delta_safe, residual_control_norm_safe = controls[min_index]
+        print(f"min_index: {min_index}")
+        u_safe, control_safe, residual_control_norm_safe = controls[min_index]
 
         # visualize the trackpoint
         marker: Marker = Marker()
@@ -233,7 +233,7 @@ class NeuralODEController(Node):
         marker.color.a = 1.0
         self.track_point_publisher.publish(marker)
 
-        return v_safe, delta_safe
+        return u_safe, control_safe
     
     def calculate_track_points(self, state: np.ndarray) -> np.ndarray:
         """
@@ -244,7 +244,8 @@ class NeuralODEController(Node):
         Returns:
             track_points (np.ndarray): The next self.lookahead_index points on the track
         """
-        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory - state, axis=0))
+        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory[:2, :] - state[:2, :], axis=0)) + 50
+        # print(f"closest_index: {closest_index}")
         track_points: np.ndarray = np.zeros((3, self.lookahead_index))
         for i in range(self.lookahead_index):
             track_points[:, i] = self.nominal_trajectory[:, (closest_index + i) % self.nominal_trajectory.shape[1]]
@@ -281,7 +282,7 @@ class NeuralODEController(Node):
         actuation_upper_bound: np.ndarray = np.array([self.v_max, self.delta_max])
 
         # CLF and CBF constraint
-        constraints.append(casadi.dot(self.control_lyapunov_function_gradient_2d(error_state), state_xdot - track_point_xdot) - epsilon)
+        constraints.append(casadi.dot(self.control_lyapunov_function_gradient_2d(error_state), state_xdot - track_point_xdot + u) - epsilon)
         constraints.append(casadi.dot(self.control_boundary_function_gradient_2d(state), state_xdot + u))
         clf_cbf_lower_bound: np.ndarray = np.array([-casadi.inf,
                                                     -self.gamma*self.control_boundary_function_2d(state)])
@@ -300,8 +301,9 @@ class NeuralODEController(Node):
             'f': cost,                  
             'g': casadi.vertcat(*constraints)  
         }
+        opts = {'ipopt.print_level':0, 'print_time':0}
         
-        solver: Function = casadi.nlpsol('solver','ipopt', nlp)
+        solver: Function = casadi.nlpsol('solver','ipopt', nlp, opts)
         lower_bound = casadi.vertcat(actuation_lower_bound, clf_cbf_lower_bound, dynamics_lower_bound)
         upper_bound = casadi.vertcat(actuation_upper_bound, clf_cbf_upper_bound, dynamics_upper_bound)
         x_guess: np.ndarray = np.zeros((6, 1))
