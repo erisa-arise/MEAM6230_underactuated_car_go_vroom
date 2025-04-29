@@ -29,8 +29,8 @@ class NeuralODEController(Node):
     def __init__(self) -> None:
         super().__init__('Neural_ODE_Controller')
         self.srv = self.create_service(GenerateNominalTrajectory,'generate_nominal_trajectory',self.generate_nominal_trajectory_callback)
-        # self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/odom_topic', self.odom_callback, 10)
-        self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
+        self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/rigid_bodies', self.odom_callback, 10)
+        # self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
         self.track_point_publisher: Publisher = self.create_publisher(Marker, '/track_point', 10)
@@ -62,7 +62,7 @@ class NeuralODEController(Node):
         self.ellipse_center: Tuple[float, float] = (-1.0, -1.0)
 
         # control lyapunov function parameters
-        self.alpha: float = 1.0
+        self.alpha: float = 100.0
         self.lookahead_index: int = 20
 
         # trajectory rollout parameters
@@ -148,17 +148,22 @@ class NeuralODEController(Node):
         Returns:
             None
         """
-        self.latest_odom = msg
+        self.latest_odom: RigidBodies = msg
+        rigid_body_name: str = msg.rigidbodies[0].rigid_body_name
+
+        if rigid_body_name != "f1tenth_car":
+            self.get_logger().warn(f'Getting odometry from {rigid_body_name}.')
+            return
 
         # extract orientation and position from the VICON ROS2 message
-        # self.latest_quaternion = msg.rigidbodies.pose.orientation
-        # self.latest_position = msg.rigidbodies.pose.position
-        # yaw = self.get_yaw_from_quaternion(self.latest_quaternion)
+        self.latest_quaternion: Quaternion = msg.rigidbodies[0].pose.orientation
+        self.latest_position: Vector3 = msg.rigidbodies[0].pose.position
+        yaw: float = self.get_yaw_from_quaternion(self.latest_quaternion)
 
         # extract orientation and position from the Sim Odometry message
-        self.latest_quaternion = msg.pose.pose.orientation
-        self.latest_position = msg.pose.pose.position
-        yaw = self.get_yaw_from_quaternion(self.latest_quaternion)
+        # self.latest_quaternion = msg.pose.pose.orientation
+        # self.latest_position = msg.pose.pose.position
+        # yaw = self.get_yaw_from_quaternion(self.latest_quaternion)
 
         if self.nominal_trajectory is None:
             self.get_logger().warn('Nominal trajectory not set. Skipping control.')
@@ -244,7 +249,7 @@ class NeuralODEController(Node):
         Returns:
             track_points (np.ndarray): The next self.lookahead_index points on the track
         """
-        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory[:2, :] - state[:2, :], axis=0)) + 50
+        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory[:2, :] - state[:2, :], axis=0))
         # print(f"closest_index: {closest_index}")
         track_points: np.ndarray = np.zeros((3, self.lookahead_index))
         for i in range(self.lookahead_index):
@@ -393,8 +398,8 @@ class NeuralODEController(Node):
         marker.action = Marker.ADD
         marker.scale.x = 0.05  # Line width
         marker.color.a = 1.0
-        marker.color.r = 0.0
-        marker.color.g = 1.0
+        marker.color.r = 1.0
+        marker.color.g = 0.0
         marker.color.b = 0.0
 
         center_x, center_y = self.ellipse_center
