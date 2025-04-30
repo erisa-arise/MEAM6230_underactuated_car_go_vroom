@@ -40,9 +40,18 @@ def reduce_data(ackermann_messages, rigid_body_messages, rigid_body_name):
                                         (rigid_body.pose.position.x, rigid_body.pose.position.y, yaw)))
     return ackermann_data, rigid_body_data
 
-def yaw_from_quaternion(quat):
-    yaw = math.atan2(2.0*(quat.y*quat.z + quat.w*quat.x), quat.w*quat.w - quat.x*quat.x - quat.y*quat.y + quat.z*quat.z)
-    return yaw
+def yaw_from_quaternion(self, quat) -> float:
+    """
+    Converts a quaternion to yaw angle.
+    
+    Args:
+        q (Quaternion): The quaternion to convert
+    Returns:
+        yaw (float): The yaw angle in radians
+    """
+    siny_cosp: float = 2.0 * (quat.w * quat.z + quat.x * quat.y)
+    cosy_cosp: float = 1.0 - 2.0 * (quat.y * quat.y + quat.z * quat.z)
+    return math.atan2(siny_cosp, cosy_cosp)
 
 def generate_dataset(ackermann_data, rigid_body_data):
     state_history = []
@@ -83,6 +92,14 @@ def visualize_state_history(state_history):
     plt.legend()
     plt.show()
 
+def visualize_yaw(state_history):
+    plt.figure()
+    plt.plot(np.cos(state_history[:, 2]), 'g-')
+    plt.title('Cosine Yaw History')
+    plt.xlabel('Time Step')
+    plt.ylabel('Yaw (radians)')
+    plt.show()
+
 def visualize_control_history(control_history):
     fig, ax = plt.subplots(2, 1)
     ax[0].plot(control_history[:, 0], 'b-')
@@ -94,8 +111,8 @@ def visualize_control_history(control_history):
 
 if __name__ == "__main__":
     filepath = os.path.dirname(os.path.abspath(__file__))
-    rosbag_path = f"{filepath}/../data/rosbag2_2025_04_11-23_21_31"
-    out_dir = f"{filepath}/../data/"
+    rosbag_path = f"{filepath}/../data/real_data/rosbag2_2025_04_11-23_21_31"
+    out_dir = f"{filepath}/../data/real_data/"
     rigid_body_name = "racecar_vroom.racecar_vroom"
     ackermann_messages = load_messages(rosbag_path, "/ackermann_cmd", "ackermann_msgs/msg/AckermannDriveStamped")
     rigid_body_messages = load_messages(rosbag_path, "/rigid_bodies", "mocap4r2_msgs/msg/RigidBodies")
@@ -110,4 +127,5 @@ if __name__ == "__main__":
     np.save(out_control_path, control_history)
 
     visualize_state_history(state_history)
+    visualize_yaw(state_history)
     visualize_control_history(control_history)

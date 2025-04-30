@@ -29,8 +29,8 @@ class NeuralODEController(Node):
     def __init__(self) -> None:
         super().__init__('Neural_ODE_Controller')
         self.srv = self.create_service(GenerateNominalTrajectory,'generate_nominal_trajectory',self.generate_nominal_trajectory_callback)
-        self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/rigid_bodies', self.odom_callback, 10)
-        # self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
+        # self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/rigid_bodies', self.odom_callback, 10)
+        self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.odometry_publisher: Publisher = self.create_publisher(Odometry, '/car_odom', 1)
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
@@ -43,13 +43,13 @@ class NeuralODEController(Node):
 
         # load the neural ODE model here
         self.file_path = os.path.dirname(os.path.abspath(__file__))
-        model_path = os.path.join(self.file_path, 'utils', 'n_ode_model_sim.pth')
+        model_path = os.path.join(self.file_path, 'utils', 'n_ode_model.pth')
         self.model: N_ODE = N_ODE()
         self.model.load_state_dict(torch.load(model_path))  
         self.model.eval()
 
         # car parameters
-        self.L: float = 1.0
+        self.L: float = 0.206
         self.v_max: float = 2.0
         self.delta_max: float = casadi.pi/4
 
@@ -57,10 +57,10 @@ class NeuralODEController(Node):
         self.lambda_: float = 1.0         
         
         # control barrier function parameters
-        self.a: float = 6.0
-        self.b: float = 5.0
+        self.a: float = 3.5
+        self.b: float = 2.5
         self.gamma: float = 1.0
-        self.ellipse_center: Tuple[float, float] = (-1.0, -1.0)
+        self.ellipse_center: Tuple[float, float] = (0.5, 0.0)
 
         # control lyapunov function parameters
         self.alpha: float = 100.0
@@ -150,30 +150,30 @@ class NeuralODEController(Node):
             None
         """
         self.latest_odom: RigidBodies = msg
-        rigid_body_name: str = msg.rigidbodies[0].rigid_body_name
+        # rigid_body_name: str = msg.rigidbodies[0].rigid_body_name
 
-        if rigid_body_name != "f1tenth.f1tenth":
-            self.get_logger().warn(f'Getting odometry from {rigid_body_name}.')
-            return
+        # if rigid_body_name != "f1tenth.f1tenth":
+        #     self.get_logger().warn(f'Getting odometry from {rigid_body_name}.')
+        #     return
         
-        # publish the odometry message for visualization
-        odometry_msg: Odometry = Odometry()
-        odometry_msg.header.frame_id = 'map'
-        odometry_msg.header.stamp = self.get_clock().now().to_msg()
-        odometry_msg.child_frame_id = 'base_link'
-        odometry_msg.pose.pose.position = msg.rigidbodies[0].pose.position
-        odometry_msg.pose.pose.orientation = msg.rigidbodies[0].pose.orientation
-        self.odometry_publisher.publish(odometry_msg)
+        # # publish the odometry message for visualization
+        # odometry_msg: Odometry = Odometry()
+        # odometry_msg.header.frame_id = 'map'
+        # odometry_msg.header.stamp = self.get_clock().now().to_msg()
+        # odometry_msg.child_frame_id = 'base_link'
+        # odometry_msg.pose.pose.position = msg.rigidbodies[0].pose.position
+        # odometry_msg.pose.pose.orientation = msg.rigidbodies[0].pose.orientation
+        # self.odometry_publisher.publish(odometry_msg)
 
         # extract orientation and position from the VICON ROS2 message
-        self.latest_quaternion: Quaternion = msg.rigidbodies[0].pose.orientation
-        self.latest_position: Vector3 = msg.rigidbodies[0].pose.position
-        yaw: float = self.get_yaw_from_quaternion(self.latest_quaternion)
+        # self.latest_quaternion: Quaternion = msg.rigidbodies[0].pose.orientation
+        # self.latest_position: Vector3 = msg.rigidbodies[0].pose.position
+        # yaw: float = self.get_yaw_from_quaternion(self.latest_quaternion)
 
         # extract orientation and position from the Sim Odometry message
-        # self.latest_quaternion = msg.pose.pose.orientation
-        # self.latest_position = msg.pose.pose.position
-        # yaw = self.get_yaw_from_quaternion(self.latest_quaternion)
+        self.latest_quaternion = msg.pose.pose.orientation
+        self.latest_position = msg.pose.pose.position
+        yaw = self.get_yaw_from_quaternion(self.latest_quaternion)
 
         if self.nominal_trajectory is None:
             self.get_logger().warn('Nominal trajectory not set. Skipping control.')
@@ -394,8 +394,8 @@ class NeuralODEController(Node):
         Returns:
             yaw (float): The yaw angle in radians
         """
-        siny_cosp: float = 2 * (q.w * q.z + q.x * q.y)
-        cosy_cosp: float = 1 - 2 * (q.y * q.y + q.z * q.z)
+        siny_cosp: float = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy_cosp: float = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
         return math.atan2(siny_cosp, cosy_cosp)
     
     def publish_ellipse(self):
