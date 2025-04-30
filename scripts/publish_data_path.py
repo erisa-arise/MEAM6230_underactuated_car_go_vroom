@@ -21,10 +21,11 @@ class TrajectoryMarkerPublisher(Node):
         self.marker.header.frame_id = "map"
         self.marker.ns = "trajectory"
         self.marker.id = 0
-        self.marker.type = Marker.LINE_STRIP
+        self.marker.type = Marker.POINTS
         self.marker.action = Marker.ADD
 
-        self.marker.scale.x = 0.1  # Line width
+        self.marker.scale.x = 0.1
+        self.marker.scale.y = 0.1
 
         # Set color to blue
         self.marker.color.r = 0.0
@@ -51,7 +52,7 @@ class TrajectoryMarkerPublisher(Node):
 def main(args=None):
     rclpy.init(args=args)
 
-    path_to_npy = "/home/frankgon/ros2_ws/src/reactive_car/data/latest_sim_teleop_data/state_history.npy"
+    path_to_npy = "/home/frankgon/ros2_ws/src/reactive_car/data/real_data/state_history.npy"
     trajectory_marker_publisher = TrajectoryMarkerPublisher(path_to_npy)
 
     rclpy.spin(trajectory_marker_publisher)

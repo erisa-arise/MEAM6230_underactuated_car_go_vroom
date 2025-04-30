@@ -31,6 +31,7 @@ class NeuralODEController(Node):
         self.srv = self.create_service(GenerateNominalTrajectory,'generate_nominal_trajectory',self.generate_nominal_trajectory_callback)
         self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/rigid_bodies', self.odom_callback, 10)
         # self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
+        self.odometry_publisher: Publisher = self.create_publisher(Odometry, '/car_odom', 1)
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
         self.track_point_publisher: Publisher = self.create_publisher(Marker, '/track_point', 10)
@@ -151,9 +152,18 @@ class NeuralODEController(Node):
         self.latest_odom: RigidBodies = msg
         rigid_body_name: str = msg.rigidbodies[0].rigid_body_name
 
-        if rigid_body_name != "f1tenth_car":
+        if rigid_body_name != "f1tenth.f1tenth":
             self.get_logger().warn(f'Getting odometry from {rigid_body_name}.')
             return
+        
+        # publish the odometry message for visualization
+        odometry_msg: Odometry = Odometry()
+        odometry_msg.header.frame_id = 'map'
+        odometry_msg.header.stamp = self.get_clock().now().to_msg()
+        odometry_msg.child_frame_id = 'base_link'
+        odometry_msg.pose.pose.position = msg.rigidbodies[0].pose.position
+        odometry_msg.pose.pose.orientation = msg.rigidbodies[0].pose.orientation
+        self.odometry_publisher.publish(odometry_msg)
 
         # extract orientation and position from the VICON ROS2 message
         self.latest_quaternion: Quaternion = msg.rigidbodies[0].pose.orientation

@@ -57,8 +57,8 @@ def train(ds, epochs=10, batch_size = 32):
 
 if __name__ == "__main__":
     filepath = os.path.dirname(os.path.abspath(__file__))
-    x_path = f"{filepath}/../data/state_history.npy"
-    y_path = f"{filepath}/../data/control_history.npy"
+    x_path = f"{filepath}/../data/real_data/state_history.npy"
+    y_path = f"{filepath}/../data/real_data/control_history.npy"
 
     ds = node_dataset(x_path, y_path)
 
