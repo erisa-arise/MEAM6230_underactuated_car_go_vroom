@@ -50,7 +50,7 @@ class NeuralODEController(Node):
 
         # car parameters
         self.L: float = 0.3302
-        self.v_max: float = 2.0
+        self.v_max: float = 1.0
         self.delta_max: float = casadi.pi/4
 
         # cost parameter
@@ -152,7 +152,7 @@ class NeuralODEController(Node):
         self.latest_odom: RigidBodies = msg
         rigid_body_name: str = msg.rigidbodies[0].rigid_body_name
 
-        if rigid_body_name != "f1tenth.f1tenth":
+        if rigid_body_name != "f1tenth_car.f1tenth_car":
             self.get_logger().warn(f'Getting odometry from {rigid_body_name}.')
             return
         
