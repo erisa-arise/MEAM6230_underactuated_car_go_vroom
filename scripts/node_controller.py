@@ -68,7 +68,7 @@ class NeuralODEController(Node):
 
         # trajectory rollout parameters
         self.dt: float = 0.05
-        self.rollout_length: int = 600
+        self.rollout_length: int = 400
         self.nominal_trajectory: np.ndarray | None = None
 
         self.get_logger().info('Initialized NODE Controller')

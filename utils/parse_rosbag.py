@@ -51,7 +51,7 @@ def yaw_from_quaternion(quat) -> float:
     """
     siny_cosp: float = 2.0 * (quat.w * quat.z + quat.x * quat.y)
     cosy_cosp: float = 1.0 - 2.0 * (quat.y * quat.y + quat.z * quat.z)
-    return math.atan2(siny_cosp, cosy_cosp)
+    return math.atan2(siny_cosp, cosy_cosp) + np.pi / 2 # Adjust for ROS coordinate system
 
 def generate_dataset(ackermann_data, rigid_body_data):
     state_history = []
@@ -72,42 +72,59 @@ def generate_dataset(ackermann_data, rigid_body_data):
             control_history.append(ackermann)
     return np.array(state_history), np.array(control_history)
 
-def visualize_state_history(state_history):
-    plt.figure()
-
+def visualize_bev(state_history):
+    fig, ax = plt.subplots()
+    
     # Add ellipse to represent boundary function
     theta = np.linspace(0, 2 * np.pi, 100)
-    a = 3.5 
-    b = 2.5
-    x0, y0 = (0.5, 0.0)
+    a, b = 3.5, 2.5
+    x0, y0 = 0.5, 0.0
     x = x0 + a * np.cos(theta)
     y = y0 + b * np.sin(theta)
-    plt.plot(x, y, 'b--', label='Ellipse')
+    ax.plot(x, y, 'b--', label='Ellipse')
 
-    # plot the state history
-    plt.plot(state_history[:, 0], state_history[:, 1], 'ro', label='State History')
-    plt.xlabel('X Position')
-    plt.ylabel('Y Position')
-    plt.title('State History')
-    plt.legend()
-    plt.show()
+    state_history_size = state_history.shape[0]
+    ax.plot(state_history[:state_history_size//reduction_factor, 0],
+            state_history[:state_history_size//reduction_factor, 1], 'ro', label='State History')
 
-def visualize_yaw(state_history):
-    plt.figure()
-    plt.plot(np.cos(state_history[:, 2]), 'g-')
-    plt.title('Cosine Yaw History')
-    plt.xlabel('Time Step')
-    plt.ylabel('Yaw (radians)')
-    plt.show()
+    ax.set_xlabel('X Position')
+    ax.set_ylabel('Y Position')
+    ax.set_title('State History')
+    ax.legend()
+    return fig, ax
+
+def visualize_state_history(state_history):
+    state_history_size = state_history.shape[0]
+    
+    fig, ax = plt.subplots(3, 1, figsize=(8, 6), sharex=True)
+    ax[0].plot(state_history[:state_history_size//reduction_factor, 0], 'r-')
+    ax[0].set_title('X Position History')
+    ax[0].set_ylabel('X Position')
+    ax[1].plot(state_history[:state_history_size//reduction_factor, 1], 'b-')
+    ax[1].set_title('Y Position History')
+    ax[1].set_ylabel('Y Position')
+    ax[2].plot(np.cos(state_history[:state_history_size//reduction_factor, 2]), 'g-')
+    ax[2].set_title('Cosine Yaw History')
+    ax[2].set_xlabel('Time Step')
+    ax[2].set_ylabel('Yaw')
+    fig.tight_layout()
+    return fig, ax
 
 def visualize_control_history(control_history):
-    fig, ax = plt.subplots(2, 1)
-    ax[0].plot(control_history[:, 0], 'b-')
+    fig, ax = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
+    control_history_size = control_history.shape[0]
+    
+    ax[0].plot(control_history[:control_history_size//reduction_factor, 0], 'b-')
     ax[0].set_title('Velocity')
-    ax[1].plot(control_history[:, 1], 'r-')
-    ax[1].set_title('Steering Angle')
-    plt.show()
+    ax[0].set_ylabel('Velocity')
 
+    ax[1].plot(control_history[:control_history_size//reduction_factor, 1], 'r-')
+    ax[1].set_title('Steering Angle')
+    ax[1].set_xlabel('Time Step')
+    ax[1].set_ylabel('Steering Angle')
+
+    fig.tight_layout()
+    return fig, ax
 
 if __name__ == "__main__":
     filepath = os.path.dirname(os.path.abspath(__file__))
@@ -120,12 +137,18 @@ if __name__ == "__main__":
     ackermann_data, pose_data = reduce_data(ackermann_messages, rigid_body_messages, rigid_body_name)
     state_history, control_history = generate_dataset(ackermann_data, pose_data)
 
+    # drop the first 40 samples of each
+    state_history = state_history[40:, :]
+    control_history = control_history[40:, :]
+
     out_state_path = out_dir + "state_history"
     out_control_path = out_dir + "control_history"
 
     np.save(out_state_path, state_history)
     np.save(out_control_path, control_history)
 
+    reduction_factor = 30
+    visualize_bev(state_history)
     visualize_state_history(state_history)
-    visualize_yaw(state_history)
     visualize_control_history(control_history)
+    plt.show()
