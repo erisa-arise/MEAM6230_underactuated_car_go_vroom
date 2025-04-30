@@ -40,7 +40,7 @@ def reduce_data(ackermann_messages, rigid_body_messages, rigid_body_name):
                                         (rigid_body.pose.position.x, rigid_body.pose.position.y, yaw)))
     return ackermann_data, rigid_body_data
 
-def yaw_from_quaternion(self, quat) -> float:
+def yaw_from_quaternion(quat) -> float:
     """
     Converts a quaternion to yaw angle.
     
