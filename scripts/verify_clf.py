@@ -20,7 +20,7 @@ from nav_msgs.msg import Odometry, Path
 from visualization_msgs.msg import Marker
 
 from reactive_car.srv import GenerateNominalTrajectory
-from utils.n_ode import N_ODE
+from utils.n_ode import LineN_ODE
 from typing import Tuple, List
 
 
@@ -28,14 +28,13 @@ class NeuralODEController(Node):
     def __init__(self) -> None:
         super().__init__('Neural_ODE_Controller')
         self.srv = self.create_service(GenerateNominalTrajectory,'generate_nominal_trajectory',self.generate_nominal_trajectory_callback)
-        self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/rigid_bodies', self.odom_callback, 10)
-        # self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
+        # self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/rigid_bodies', self.odom_callback, 10)
+        self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.odometry_publisher: Publisher = self.create_publisher(Odometry, '/car_odom', 1)
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
         self.track_point_publisher: Publisher = self.create_publisher(Marker, '/track_point', 10)
         self.ellipse_publisher: Publisher = self.create_publisher(Marker, '/ellipse_marker', 10)
-        self.create_timer(1.0, self.publish_ellipse)
 
         self.latest_position: Vector3 | None = None
         self.latest_quaternion: Quaternion | None = None
@@ -43,7 +42,7 @@ class NeuralODEController(Node):
         # load the neural ODE model here
         self.file_path = os.path.dirname(os.path.abspath(__file__))
         model_path = os.path.join(self.file_path, 'utils', 'n_ode_model.pth')
-        self.model: N_ODE = N_ODE()
+        self.model: LineN_ODE = LineN_ODE()
         self.model.load_state_dict(torch.load(model_path))  
         self.model.eval()
 
@@ -53,13 +52,7 @@ class NeuralODEController(Node):
         self.delta_max: float = casadi.pi/4
 
         # cost parameter
-        self.lambda_: float = 5.0         
-        
-        # control barrier function parameters
-        self.a: float = 3.5
-        self.b: float = 2.5
-        self.gamma: float = 5.0
-        self.ellipse_center: Tuple[float, float] = (0.5, 0.0)
+        self.lambda_: float = 5.0   
 
         # control lyapunov function parameters
         self.alpha: float = 100.0
@@ -67,10 +60,10 @@ class NeuralODEController(Node):
 
         # trajectory rollout parameters
         self.dt: float = 0.05
-        self.rollout_length: int = 300
+        self.rollout_length: int = 1000
         self.nominal_trajectory: np.ndarray | None = None
 
-        self.get_logger().info('Initialized NODE Controller')
+        self.get_logger().info('Straight Line ODE Controller')
 
     def generate_nominal_trajectory_callback(self, request, response):
         """
@@ -186,6 +179,8 @@ class NeuralODEController(Node):
 
         # compute the safe control
         u_safe, control_safe = self.compute_safe_control(state) 
+        print(f"u_safe: {u_safe}")
+        print(f"control_safe: {control_safe}")
         
         # publish the safe velocity and steering angle
         ackermann_msg: AckermannDriveStamped = AckermannDriveStamped()
@@ -216,8 +211,7 @@ class NeuralODEController(Node):
             track_point_tensor = torch.tensor(track_point.T, dtype=torch.float32)
             track_point_velocity: torch.Tensor = self.model(track_point_tensor)
             track_point_xdot: np.ndarray = self.map_n_ode_to_x_dot(track_point_velocity, track_point_tensor)
-            error_state: np.ndarray = state - track_point
-            u_opt, control_opt, epsilon_opt = self.solve_control_optimization(state, error_state, track_point_xdot, state_xdot)
+            u_opt, control_opt, epsilon_opt = self.solve_control_optimization(state, track_point, track_point_xdot, state_xdot)
             residual_control_norm = (u_opt[0]/self.v_max)**2 + (u_opt[1]/self.v_max)**2 + (u_opt[2]/self.delta_max)**2
             controls.append((u_opt, control_opt, residual_control_norm))
 
@@ -268,7 +262,7 @@ class NeuralODEController(Node):
             track_points[:, i] = self.nominal_trajectory[:, (closest_index + i) % self.nominal_trajectory.shape[1]]
         return track_points
     
-    def solve_control_optimization(self, state: np.ndarray, error_state: np.ndarray, 
+    def solve_control_optimization(self, state: np.ndarray, track_point: np.ndarray, 
                                     track_point_xdot: np.ndarray, state_xdot: np.ndarray) -> Tuple[float]:
         """
         Solves for the desired safe velocity and steering angle for the given trackpoint.
@@ -299,12 +293,9 @@ class NeuralODEController(Node):
         actuation_upper_bound: np.ndarray = np.array([self.v_max, self.delta_max])
 
         # CLF and CBF constraint
-        constraints.append(casadi.dot(self.control_lyapunov_function_gradient_2d(error_state), state_xdot - track_point_xdot + u) - epsilon)
-        constraints.append(casadi.dot(self.control_boundary_function_gradient_2d(state), state_xdot + u))
-        clf_cbf_lower_bound: np.ndarray = np.array([-casadi.inf,
-                                                    -self.gamma*self.control_boundary_function_2d(state)])
-        clf_cbf_upper_bound: np.ndarray = np.array([-self.alpha*self.control_lyapunov_function_2d(error_state),
-                                                    casadi.inf])
+        constraints.append(casadi.dot(self.control_lyapunov_function_gradient_2d(state, track_point), state_xdot - track_point_xdot + u) - epsilon)
+        clf_cbf_lower_bound: np.ndarray = np.array([-casadi.inf])
+        clf_cbf_upper_bound: np.ndarray = np.array([-self.alpha*self.control_lyapunov_function_2d(state, track_point)])
 
         # Dynamics Constraint
         constraints.append(state_xdot[0] + u[0] - control[0]*np.cos(state[2]))
@@ -332,35 +323,8 @@ class NeuralODEController(Node):
         epsilon_opt: float = x_opt[5]
 
         return u_opt, control_opt, epsilon_opt
-    
-    def control_boundary_function_2d(self, state: np.ndarray) -> float:
-        """
-        Computes the control barrier function.
-        
-        Args:
-            state (np.ndarray): The current state of the car in the form [x, y, theta]
-        Returns:
-            b_x (np.ndarray): The control barrier function
-        """
-        b_x: float = 1 - ((state[0][0] - self.ellipse_center[0]) / self.a)**2 - ((state[1][0] - self.ellipse_center[1]) / self.b)**2
-        return b_x
 
-    def control_boundary_function_gradient_2d(self, state: np.ndarray) -> casadi.DM:
-        """
-        Computes the gradient of the control barrier function.
-
-        Args:
-            state (np.ndarray): The current state of the car in the form [x, y, theta]
-        Returns:
-            db_dx (casadi.DM): The gradient of the control barrier function
-        """
-        db_dx: casadi.DM = casadi.DM(3, 1)
-        db_dx[0] = -2 * (state[0] - self.ellipse_center[0]) / (self.a**2)
-        db_dx[1] = -2 * (state[1] - self.ellipse_center[1]) / (self.b**2)
-        db_dx[2] = 0
-        return db_dx
-
-    def control_lyapunov_function_2d(self, error_state: np.ndarray) -> float:
+    def control_lyapunov_function_2d(self, state: np.ndarray, track_point: np.ndarray) -> float:
         """
         Computes the control lyapunov function.
 
@@ -369,10 +333,15 @@ class NeuralODEController(Node):
         Returns:
             V (float): The control lyapunov function
         """
-        V = (error_state[0][0]**2 + error_state[1][0]**2)
-        return V
+        error_x = track_point[0][0] - state[0][0]
+        error_y = track_point[1][0] - state[1][0]
+        theta = state[2][0]
 
-    def control_lyapunov_function_gradient_2d(self, error_state: np.ndarray) -> casadi.DM:
+        V_1 = (error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)**2
+        V_2 = (error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)**2
+        return V_1 + V_2
+
+    def control_lyapunov_function_gradient_2d(self, state: np.ndarray, track_point: np.ndarray) -> casadi.DM:
         """
         Computes the gradient of the control lyapunov function.
 
@@ -381,11 +350,26 @@ class NeuralODEController(Node):
         Returns:
             dV_dx (casadi.DM): The gradient of the control lyapunov function
         """
-        dV_dx: casadi.DM = casadi.DM(3, 1)
-        dV_dx[0] = 2 * error_state[0][0]
-        dV_dx[1] = 2 * error_state[1][0]
-        dV_dx[2] = 0
-        return dV_dx
+        error_x = track_point[0][0] - state[0][0]
+        error_y = track_point[1][0] - state[1][0]
+        theta = state[2][0]
+
+        dV_dstate: casadi.DM = casadi.DM(3, 1)
+        dV_dx1 = 2*(error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)*(np.cos(theta)**2-1)
+        dV_dx2 = 2*(error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)*(np.cos(theta)*np.sin(theta))
+        dV_dx = dV_dx1 + dV_dx2
+        dV_dstate[0] = dV_dx
+
+        dV_dy1 = 2*(error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)*(np.cos(theta)*np.sin(theta))
+        dV_dy2 = 2*(error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)*(np.sin(theta)**2-1)
+        dV_dy = dV_dy1 + dV_dy2
+        dV_dstate[1] = dV_dy
+
+        dV_dtheta1 = 2*(error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)*(2*error_x*np.cos(theta)*np.sin(theta)-error_y*(np.cos(theta)**2-np.sin(theta)**2))
+        dV_dtheta2 = 2*(error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)*(-2*error_y*np.cos(theta)*np.sin(theta)-error_x*(np.cos(theta)**2-np.sin(theta)**2))
+        dV_dtheta = dV_dtheta1 + dV_dtheta2
+        dV_dstate[2] = dV_dtheta
+        return dV_dstate
     
     def get_yaw_from_quaternion(self, q: Quaternion) -> float:
         """
@@ -399,36 +383,6 @@ class NeuralODEController(Node):
         siny_cosp: float = 2.0 * (q.w * q.z + q.x * q.y)
         cosy_cosp: float = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
         return math.atan2(siny_cosp, cosy_cosp)
-    
-    def publish_ellipse(self):
-        marker = Marker()
-        marker.header.frame_id = "map"
-        marker.header.stamp = self.get_clock().now().to_msg()
-        marker.ns = "ellipse"
-        marker.id = 0
-        marker.type = Marker.LINE_STRIP
-        marker.action = Marker.ADD
-        marker.scale.x = 0.05  # Line width
-        marker.color.a = 1.0
-        marker.color.r = 1.0
-        marker.color.g = 0.0
-        marker.color.b = 0.0
-
-        center_x, center_y = self.ellipse_center
-        a, b = self.a, self.b
-
-        for theta in np.linspace(0, 2 * math.pi, 100):
-            x = center_x + a * math.cos(theta)
-            y = center_y + b * math.sin(theta)
-
-            point = Point()
-            point.x = x
-            point.y = y
-            point.z = 0.0
-            marker.points.append(point)
-
-        self.ellipse_publisher.publish(marker)
-
 
 def main(args=None):
     rclpy.init(args=args)

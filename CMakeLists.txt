@@ -24,6 +24,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 
 install(PROGRAMS
   scripts/node_controller.py
+  scripts/verify_clf.py
+  scripts/verify_cbf.py
   scripts/publish_data_path.py
   DESTINATION lib/${PROJECT_NAME}
 )

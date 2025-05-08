@@ -15,3 +15,13 @@ class N_ODE(nn.Module):
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
         return x
+    
+
+class LineN_ODE(nn.Module):
+    def __init__(self, input_dim=4, out_dim=2, hidden_dim=32):
+        super(LineN_ODE, self).__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, out_dim)
+
+    def forward(self, x):
+        return torch.tensor([[0.5, 0]])

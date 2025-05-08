@@ -20,7 +20,7 @@ from nav_msgs.msg import Odometry, Path
 from visualization_msgs.msg import Marker
 
 from reactive_car.srv import GenerateNominalTrajectory
-from utils.n_ode import N_ODE
+from utils.n_ode import LineN_ODE
 from typing import Tuple, List
 
 
@@ -28,8 +28,8 @@ class NeuralODEController(Node):
     def __init__(self) -> None:
         super().__init__('Neural_ODE_Controller')
         self.srv = self.create_service(GenerateNominalTrajectory,'generate_nominal_trajectory',self.generate_nominal_trajectory_callback)
-        self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/rigid_bodies', self.odom_callback, 10)
-        # self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
+        # self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/rigid_bodies', self.odom_callback, 10)
+        self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.odometry_publisher: Publisher = self.create_publisher(Odometry, '/car_odom', 1)
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
@@ -43,23 +43,23 @@ class NeuralODEController(Node):
         # load the neural ODE model here
         self.file_path = os.path.dirname(os.path.abspath(__file__))
         model_path = os.path.join(self.file_path, 'utils', 'n_ode_model.pth')
-        self.model: N_ODE = N_ODE()
+        self.model: LineN_ODE = LineN_ODE()
         self.model.load_state_dict(torch.load(model_path))  
         self.model.eval()
 
         # car parameters
         self.L: float = 0.3302
-        self.v_max: float = 1.0
+        self.v_max: float = 0.5
         self.delta_max: float = casadi.pi/4
 
         # cost parameter
         self.lambda_: float = 5.0         
         
-        # control barrier function parameters
-        self.a: float = 3.5
-        self.b: float = 2.5
+        # obstacle parameters
+        self.a: float = 0.2
+        self.b: float = 0.2
         self.gamma: float = 5.0
-        self.ellipse_center: Tuple[float, float] = (0.5, 0.0)
+        self.ellipse_center: Tuple[float, float] = (3.0, 0.0)
 
         # control lyapunov function parameters
         self.alpha: float = 100.0
@@ -67,7 +67,7 @@ class NeuralODEController(Node):
 
         # trajectory rollout parameters
         self.dt: float = 0.05
-        self.rollout_length: int = 300
+        self.rollout_length: int = 500
         self.nominal_trajectory: np.ndarray | None = None
 
         self.get_logger().info('Initialized NODE Controller')
@@ -186,6 +186,11 @@ class NeuralODEController(Node):
 
         # compute the safe control
         u_safe, control_safe = self.compute_safe_control(state) 
+        print('=======================================================')
+        print(f"state: {state}")
+        print(f"NODE output: {self.model(torch.tensor(state.T, dtype=torch.float32))}")
+        print(f"u_safe: {u_safe}")
+        print(f"control_safe: {control_safe}")
         
         # publish the safe velocity and steering angle
         ackermann_msg: AckermannDriveStamped = AckermannDriveStamped()
@@ -342,7 +347,7 @@ class NeuralODEController(Node):
         Returns:
             b_x (np.ndarray): The control barrier function
         """
-        b_x: float = 1 - ((state[0][0] - self.ellipse_center[0]) / self.a)**2 - ((state[1][0] - self.ellipse_center[1]) / self.b)**2
+        b_x: float = ((state[0][0] - self.ellipse_center[0]) / self.a)**2 - ((state[1][0] - self.ellipse_center[1]) / self.b)**2 - 1
         return b_x
 
     def control_boundary_function_gradient_2d(self, state: np.ndarray) -> casadi.DM:
@@ -355,8 +360,8 @@ class NeuralODEController(Node):
             db_dx (casadi.DM): The gradient of the control barrier function
         """
         db_dx: casadi.DM = casadi.DM(3, 1)
-        db_dx[0] = -2 * (state[0] - self.ellipse_center[0]) / (self.a**2)
-        db_dx[1] = -2 * (state[1] - self.ellipse_center[1]) / (self.b**2)
+        db_dx[0] = 2 * (state[0] - self.ellipse_center[0]) / (self.a**2)
+        db_dx[1] = 2 * (state[1] - self.ellipse_center[1]) / (self.b**2)
         db_dx[2] = 0
         return db_dx
 
@@ -408,7 +413,7 @@ class NeuralODEController(Node):
         marker.id = 0
         marker.type = Marker.LINE_STRIP
         marker.action = Marker.ADD
-        marker.scale.x = 0.05  # Line width
+        marker.scale.x = 0.01  # Line width
         marker.color.a = 1.0
         marker.color.r = 1.0
         marker.color.g = 0.0
