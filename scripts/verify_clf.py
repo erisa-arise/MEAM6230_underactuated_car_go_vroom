@@ -179,8 +179,6 @@ class NeuralODEController(Node):
 
         # compute the safe control
         u_safe, control_safe = self.compute_safe_control(state) 
-        print(f"u_safe: {u_safe}")
-        print(f"control_safe: {control_safe}")
         
         # publish the safe velocity and steering angle
         ackermann_msg: AckermannDriveStamped = AckermannDriveStamped()
@@ -217,7 +215,6 @@ class NeuralODEController(Node):
 
         # choose the smallest residual control
         min_index = np.argmin([control[2] for control in controls])
-        print(f"min_index: {min_index}")
         u_safe, control_safe, residual_control_norm_safe = controls[min_index]
 
         # visualize the trackpoint
@@ -244,6 +241,16 @@ class NeuralODEController(Node):
         marker.color.a = 1.0
         self.track_point_publisher.publish(marker)
 
+        print("===============================")
+        print(f"state: {state.T}")
+        print(f"NODE Ouptut: {self.model(torch.tensor(state.T, dtype=torch.float32))}")
+        print(f"NODE Output in X_dot: {self.map_n_ode_to_x_dot(self.model(torch.tensor(state.T, dtype=torch.float32)), torch.tensor(state.T, dtype=torch.float32)).T}")
+        print(f"Track Point: {track_points[:, min_index].T}")
+        print(f"V {self.control_lyapunov_function_2d(state, track_points[:, min_index:min_index+1])}")
+        print(f"V Gradient: {self.control_lyapunov_function_gradient_2d(state, track_points[:, min_index:min_index+1])}")
+        print(f"u_safe: {u_safe}")
+        print(f"control_safe: {control_safe}")
+
         return u_safe, control_safe
     
     def calculate_track_points(self, state: np.ndarray) -> np.ndarray:
@@ -255,8 +262,7 @@ class NeuralODEController(Node):
         Returns:
             track_points (np.ndarray): The next self.lookahead_index points on the track
         """
-        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory[:2, :] - state[:2, :], axis=0))
-        # print(f"closest_index: {closest_index}")
+        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory[:2, :] - state[:2, :], axis=0)) + 30
         track_points: np.ndarray = np.zeros((3, self.lookahead_index))
         for i in range(self.lookahead_index):
             track_points[:, i] = self.nominal_trajectory[:, (closest_index + i) % self.nominal_trajectory.shape[1]]
@@ -337,9 +343,14 @@ class NeuralODEController(Node):
         error_y = track_point[1][0] - state[1][0]
         theta = state[2][0]
 
-        V_1 = (error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)**2
-        V_2 = (error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)**2
-        return V_1 + V_2
+        # V_1 = (error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)**2
+        # V_2 = (error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)**2
+        # V = V_1 + V_2
+
+        # V = error_x**2*(1-np.cos(theta)**2) + error_y**2*(1-np.sin(theta)**2) - 2*error_x*error_y*np.cos(theta)*np.sin(theta)
+
+        V = np.sqrt(error_x**2 + error_y**2) - error_x*np.cos(theta) - error_y*np.sin(theta)
+        return V
 
     def control_lyapunov_function_gradient_2d(self, state: np.ndarray, track_point: np.ndarray) -> casadi.DM:
         """
@@ -355,19 +366,31 @@ class NeuralODEController(Node):
         theta = state[2][0]
 
         dV_dstate: casadi.DM = casadi.DM(3, 1)
-        dV_dx1 = 2*(error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)*(np.cos(theta)**2-1)
-        dV_dx2 = 2*(error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)*(np.cos(theta)*np.sin(theta))
-        dV_dx = dV_dx1 + dV_dx2
+        # dV_dx1 = 2*(error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)*(np.cos(theta)**2-1)
+        # dV_dx2 = 2*(error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)*(np.cos(theta)*np.sin(theta))
+        # dV_dx = dV_dx1 + dV_dx2
+
+        # dV_dx = -2*error_x*(1-np.cos(theta)**2) + 2*error_y*np.cos(theta)*np.sin(theta)
+
+        dV_dx = -((error_x)/np.sqrt(error_x**2+error_y**2)) + np.cos(theta)
         dV_dstate[0] = dV_dx
 
-        dV_dy1 = 2*(error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)*(np.cos(theta)*np.sin(theta))
-        dV_dy2 = 2*(error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)*(np.sin(theta)**2-1)
-        dV_dy = dV_dy1 + dV_dy2
+        # dV_dy1 = 2*(error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)*(np.cos(theta)*np.sin(theta))
+        # dV_dy2 = 2*(error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)*(np.sin(theta)**2-1)
+        # dV_dy = dV_dy1 + dV_dy2
+
+        # dV_dy = -2*error_y*(1-np.sin(theta)**2) + 2*error_x*np.cos(theta)*np.sin(theta)
+
+        dV_dy = -((error_y)/np.sqrt(error_x**2+error_y**2)) + np.sin(theta)
         dV_dstate[1] = dV_dy
 
-        dV_dtheta1 = 2*(error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)*(2*error_x*np.cos(theta)*np.sin(theta)-error_y*(np.cos(theta)**2-np.sin(theta)**2))
-        dV_dtheta2 = 2*(error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)*(-2*error_y*np.cos(theta)*np.sin(theta)-error_x*(np.cos(theta)**2-np.sin(theta)**2))
-        dV_dtheta = dV_dtheta1 + dV_dtheta2
+        # dV_dtheta1 = 2*(error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)*(2*error_x*np.cos(theta)*np.sin(theta)-error_y*(np.cos(theta)**2-np.sin(theta)**2))
+        # dV_dtheta2 = 2*(error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)*(-2*error_y*np.cos(theta)*np.sin(theta)-error_x*(np.cos(theta)**2-np.sin(theta)**2))
+        # dV_dtheta = dV_dtheta1 + dV_dtheta2
+
+        # dV_dtheta = 2*error_x**2*np.cos(theta)*np.sin(theta) - 2*error_y**2*np.cos(theta)*np.sin(theta) - 2*error_x*error_y*(np.cos(theta)**2-np.sin(theta)**2)
+
+        dV_dtheta = error_x*np.sin(theta) - error_y*np.cos(theta)
         dV_dstate[2] = dV_dtheta
         return dV_dstate
     
