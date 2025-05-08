@@ -343,12 +343,6 @@ class NeuralODEController(Node):
         error_y = track_point[1][0] - state[1][0]
         theta = state[2][0]
 
-        # V_1 = (error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)**2
-        # V_2 = (error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)**2
-        # V = V_1 + V_2
-
-        # V = error_x**2*(1-np.cos(theta)**2) + error_y**2*(1-np.sin(theta)**2) - 2*error_x*error_y*np.cos(theta)*np.sin(theta)
-
         V = np.sqrt(error_x**2 + error_y**2) - error_x*np.cos(theta) - error_y*np.sin(theta)
         return V
 
@@ -366,29 +360,12 @@ class NeuralODEController(Node):
         theta = state[2][0]
 
         dV_dstate: casadi.DM = casadi.DM(3, 1)
-        # dV_dx1 = 2*(error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)*(np.cos(theta)**2-1)
-        # dV_dx2 = 2*(error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)*(np.cos(theta)*np.sin(theta))
-        # dV_dx = dV_dx1 + dV_dx2
-
-        # dV_dx = -2*error_x*(1-np.cos(theta)**2) + 2*error_y*np.cos(theta)*np.sin(theta)
 
         dV_dx = -((error_x)/np.sqrt(error_x**2+error_y**2)) + np.cos(theta)
         dV_dstate[0] = dV_dx
 
-        # dV_dy1 = 2*(error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)*(np.cos(theta)*np.sin(theta))
-        # dV_dy2 = 2*(error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)*(np.sin(theta)**2-1)
-        # dV_dy = dV_dy1 + dV_dy2
-
-        # dV_dy = -2*error_y*(1-np.sin(theta)**2) + 2*error_x*np.cos(theta)*np.sin(theta)
-
         dV_dy = -((error_y)/np.sqrt(error_x**2+error_y**2)) + np.sin(theta)
         dV_dstate[1] = dV_dy
-
-        # dV_dtheta1 = 2*(error_x*(1-np.cos(theta)**2)-np.cos(theta)*np.sin(theta)*error_y)*(2*error_x*np.cos(theta)*np.sin(theta)-error_y*(np.cos(theta)**2-np.sin(theta)**2))
-        # dV_dtheta2 = 2*(error_y*(1-np.sin(theta)**2)-np.cos(theta)*np.sin(theta)*error_x)*(-2*error_y*np.cos(theta)*np.sin(theta)-error_x*(np.cos(theta)**2-np.sin(theta)**2))
-        # dV_dtheta = dV_dtheta1 + dV_dtheta2
-
-        # dV_dtheta = 2*error_x**2*np.cos(theta)*np.sin(theta) - 2*error_y**2*np.cos(theta)*np.sin(theta) - 2*error_x*error_y*(np.cos(theta)**2-np.sin(theta)**2)
 
         dV_dtheta = error_x*np.sin(theta) - error_y*np.cos(theta)
         dV_dstate[2] = dV_dtheta
