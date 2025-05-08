@@ -18,6 +18,7 @@ from ackermann_msgs.msg import AckermannDriveStamped
 from mocap4r2_msgs.msg import RigidBodies
 from nav_msgs.msg import Odometry, Path
 from visualization_msgs.msg import Marker
+from std_msgs.msg import Float32
 
 from reactive_car.srv import GenerateNominalTrajectory
 from utils.n_ode import N_ODE
@@ -32,6 +33,7 @@ class NeuralODEController(Node):
         self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.odometry_publisher: Publisher = self.create_publisher(Odometry, '/car_odom', 1)
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
+        self.lyaponuv_publisher: Publisher = self.create_publisher(Float32, '/lyapunov', 10)
         self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
         self.track_point_publisher: Publisher = self.create_publisher(Marker, '/track_point', 10)
         self.ellipse_publisher: Publisher = self.create_publisher(Marker, '/ellipse_marker', 10)
@@ -220,9 +222,14 @@ class NeuralODEController(Node):
             residual_control_norm = (u_opt[0]/self.v_max)**2 + (u_opt[1]/self.v_max)**2 + (u_opt[2]/self.delta_max)**2
             controls.append((u_opt, control_opt, residual_control_norm))
 
+        # publish the Lyapunov function value
+        lyapunov_value: float = self.control_lyapunov_function_2d(state, track_points[:, min_index:min_index+1])
+        lyapunov_msg: Float32 = Float32()
+        lyapunov_msg.data = lyapunov_value
+        self.lyaponuv_publisher.publish(lyapunov_msg)
+
         # choose the smallest residual control
         min_index = np.argmin([control[2] for control in controls])
-        print(f"min_index: {min_index}")
         u_safe, control_safe, residual_control_norm_safe = controls[min_index]
 
         # visualize the trackpoint

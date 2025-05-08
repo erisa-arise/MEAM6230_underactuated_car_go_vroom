@@ -17,6 +17,7 @@ from geometry_msgs.msg import Quaternion, Vector3, PoseStamped, Point
 from ackermann_msgs.msg import AckermannDriveStamped
 from mocap4r2_msgs.msg import RigidBodies
 from nav_msgs.msg import Odometry, Path
+from std_msgs.msg import Float32, Header
 from visualization_msgs.msg import Marker
 
 from reactive_car.srv import GenerateNominalTrajectory
@@ -32,6 +33,7 @@ class NeuralODEController(Node):
         self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.odometry_publisher: Publisher = self.create_publisher(Odometry, '/car_odom', 1)
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
+        self.lyaponuv_publisher: Publisher = self.create_publisher(Float32, '/lyapunov', 10)
         self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
         self.track_point_publisher: Publisher = self.create_publisher(Marker, '/track_point', 10)
         self.ellipse_publisher: Publisher = self.create_publisher(Marker, '/ellipse_marker', 10)
@@ -217,6 +219,12 @@ class NeuralODEController(Node):
         min_index = np.argmin([control[2] for control in controls])
         u_safe, control_safe, residual_control_norm_safe = controls[min_index]
 
+        # publish the Lyapunov function value
+        lyapunov_value: float = self.control_lyapunov_function_2d(state, track_points[:, min_index:min_index+1])
+        lyapunov_msg: Float32 = Float32()
+        lyapunov_msg.data = lyapunov_value
+        self.lyaponuv_publisher.publish(lyapunov_msg)
+
         # visualize the trackpoint
         marker: Marker = Marker()
         marker.header.frame_id = 'map'
@@ -240,16 +248,6 @@ class NeuralODEController(Node):
         marker.color.b = 0.0
         marker.color.a = 1.0
         self.track_point_publisher.publish(marker)
-
-        print("===============================")
-        print(f"state: {state.T}")
-        print(f"NODE Ouptut: {self.model(torch.tensor(state.T, dtype=torch.float32))}")
-        print(f"NODE Output in X_dot: {self.map_n_ode_to_x_dot(self.model(torch.tensor(state.T, dtype=torch.float32)), torch.tensor(state.T, dtype=torch.float32)).T}")
-        print(f"Track Point: {track_points[:, min_index].T}")
-        print(f"V {self.control_lyapunov_function_2d(state, track_points[:, min_index:min_index+1])}")
-        print(f"V Gradient: {self.control_lyapunov_function_gradient_2d(state, track_points[:, min_index:min_index+1])}")
-        print(f"u_safe: {u_safe}")
-        print(f"control_safe: {control_safe}")
 
         return u_safe, control_safe
     
