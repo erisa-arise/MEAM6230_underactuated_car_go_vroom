@@ -335,7 +335,8 @@ class NeuralODEController(Node):
         Computes the control lyapunov function.
 
         Args:
-            error_state (np.ndarray): The error state of the car in the form [x, y]
+            state (np.ndarray): The current state of the car in the form [x, y, theta]
+            track_point (np.ndarray): The track point in the form [x, y]
         Returns:
             V (float): The control lyapunov function
         """
@@ -351,7 +352,8 @@ class NeuralODEController(Node):
         Computes the gradient of the control lyapunov function.
 
         Args:
-            error_state (np.ndarray): The error state of the car in the form [x, y]
+            state (np.ndarray): The current state of the car in the form [x, y, theta]
+            track_point (np.ndarray): The track point in the form [x, y]
         Returns:
             dV_dx (casadi.DM): The gradient of the control lyapunov function
         """
