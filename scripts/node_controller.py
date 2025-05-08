@@ -28,8 +28,8 @@ class NeuralODEController(Node):
     def __init__(self) -> None:
         super().__init__('Neural_ODE_Controller')
         self.srv = self.create_service(GenerateNominalTrajectory,'generate_nominal_trajectory',self.generate_nominal_trajectory_callback)
-        self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/rigid_bodies', self.odom_callback, 10)
-        # self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
+        # self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/rigid_bodies', self.odom_callback, 10)
+        self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.odometry_publisher: Publisher = self.create_publisher(Odometry, '/car_odom', 1)
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
@@ -216,8 +216,7 @@ class NeuralODEController(Node):
             track_point_tensor = torch.tensor(track_point.T, dtype=torch.float32)
             track_point_velocity: torch.Tensor = self.model(track_point_tensor)
             track_point_xdot: np.ndarray = self.map_n_ode_to_x_dot(track_point_velocity, track_point_tensor)
-            error_state: np.ndarray = state - track_point
-            u_opt, control_opt, epsilon_opt = self.solve_control_optimization(state, error_state, track_point_xdot, state_xdot)
+            u_opt, control_opt, epsilon_opt = self.solve_control_optimization(state, track_point, track_point_xdot, state_xdot)
             residual_control_norm = (u_opt[0]/self.v_max)**2 + (u_opt[1]/self.v_max)**2 + (u_opt[2]/self.delta_max)**2
             controls.append((u_opt, control_opt, residual_control_norm))
 
@@ -261,21 +260,21 @@ class NeuralODEController(Node):
         Returns:
             track_points (np.ndarray): The next self.lookahead_index points on the track
         """
-        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory[:2, :] - state[:2, :], axis=0))
+        closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory[:2, :] - state[:2, :], axis=0)) + 10
         # print(f"closest_index: {closest_index}")
         track_points: np.ndarray = np.zeros((3, self.lookahead_index))
         for i in range(self.lookahead_index):
             track_points[:, i] = self.nominal_trajectory[:, (closest_index + i) % self.nominal_trajectory.shape[1]]
         return track_points
     
-    def solve_control_optimization(self, state: np.ndarray, error_state: np.ndarray, 
+    def solve_control_optimization(self, state: np.ndarray, track_point: np.ndarray, 
                                     track_point_xdot: np.ndarray, state_xdot: np.ndarray) -> Tuple[float]:
         """
         Solves for the desired safe velocity and steering angle for the given trackpoint.
 
         Args:
             state (np.ndarray): The current state of the car in the form [x, y, theta]
-            error_state (np.ndarray): The error state of the car in the form [x, y]
+            track_point (np.ndarray): The track point in the form [x, y, theta]
             track_point_xdot (np.ndarray): The x_dot vector of the trackpoint in the form [x_dot, y_dot, theta_dot]
             state_xdot (np.ndarray): The x_dot vector of the current state queried from the n_ode in the form [x_dot, y_dot, theta_dot]
         Returns:
@@ -299,12 +298,12 @@ class NeuralODEController(Node):
         actuation_upper_bound: np.ndarray = np.array([self.v_max, self.delta_max])
 
         # CLF and CBF constraint
-        constraints.append(casadi.dot(self.control_lyapunov_function_gradient_2d(error_state), state_xdot - track_point_xdot + u) - epsilon)
-        constraints.append(casadi.dot(self.control_boundary_function_gradient_2d(state), state_xdot + u))
-        clf_cbf_lower_bound: np.ndarray = np.array([-casadi.inf,
-                                                    -self.gamma*self.control_boundary_function_2d(state)])
-        clf_cbf_upper_bound: np.ndarray = np.array([-self.alpha*self.control_lyapunov_function_2d(error_state),
-                                                    casadi.inf])
+        constraints.append(casadi.dot(self.control_lyapunov_function_gradient_2d(state, track_point), state_xdot - track_point_xdot + u) - epsilon)
+        # constraints.append(casadi.dot(self.control_boundary_function_gradient_2d(state), state_xdot + u))
+        clf_cbf_lower_bound: np.ndarray = np.array([-casadi.inf])
+                                                    # -self.gamma*self.control_boundary_function_2d(state)])
+        clf_cbf_upper_bound: np.ndarray = np.array([-self.alpha*self.control_lyapunov_function_2d(state, track_point)])
+                                                    # casadi.inf])
 
         # Dynamics Constraint
         constraints.append(state_xdot[0] + u[0] - control[0]*np.cos(state[2]))
@@ -360,32 +359,48 @@ class NeuralODEController(Node):
         db_dx[2] = 0
         return db_dx
 
-    def control_lyapunov_function_2d(self, error_state: np.ndarray) -> float:
+    def control_lyapunov_function_2d(self, state: np.ndarray, track_point: np.ndarray) -> float:
         """
         Computes the control lyapunov function.
 
         Args:
-            error_state (np.ndarray): The error state of the car in the form [x, y]
+            state (np.ndarray): The current state of the car in the form [x, y, theta]
+            track_point (np.ndarray): The track point in the form [x, y]
         Returns:
             V (float): The control lyapunov function
         """
-        V = (error_state[0][0]**2 + error_state[1][0]**2)
+        error_x = track_point[0][0] - state[0][0]
+        error_y = track_point[1][0] - state[1][0]
+        theta = state[2][0]
+
+        V = np.sqrt(error_x**2 + error_y**2) - error_x*np.cos(theta) - error_y*np.sin(theta)
         return V
 
-    def control_lyapunov_function_gradient_2d(self, error_state: np.ndarray) -> casadi.DM:
+    def control_lyapunov_function_gradient_2d(self, state: np.ndarray, track_point: np.ndarray) -> casadi.DM:
         """
         Computes the gradient of the control lyapunov function.
 
         Args:
-            error_state (np.ndarray): The error state of the car in the form [x, y]
+            state (np.ndarray): The current state of the car in the form [x, y, theta]
+            track_point (np.ndarray): The track point in the form [x, y]
         Returns:
             dV_dx (casadi.DM): The gradient of the control lyapunov function
         """
-        dV_dx: casadi.DM = casadi.DM(3, 1)
-        dV_dx[0] = 2 * error_state[0][0]
-        dV_dx[1] = 2 * error_state[1][0]
-        dV_dx[2] = 0
-        return dV_dx
+        error_x = track_point[0][0] - state[0][0]
+        error_y = track_point[1][0] - state[1][0]
+        theta = state[2][0]
+
+        dV_dstate: casadi.DM = casadi.DM(3, 1)
+
+        dV_dx = -((error_x)/np.sqrt(error_x**2+error_y**2)) + np.cos(theta)
+        dV_dstate[0] = dV_dx
+
+        dV_dy = -((error_y)/np.sqrt(error_x**2+error_y**2)) + np.sin(theta)
+        dV_dstate[1] = dV_dy
+
+        dV_dtheta = error_x*np.sin(theta) - error_y*np.cos(theta)
+        dV_dstate[2] = dV_dtheta
+        return dV_dstate
     
     def get_yaw_from_quaternion(self, q: Quaternion) -> float:
         """
