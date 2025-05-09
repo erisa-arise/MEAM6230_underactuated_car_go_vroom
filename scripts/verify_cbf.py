@@ -17,6 +17,7 @@ from geometry_msgs.msg import Quaternion, Vector3, PoseStamped, Point
 from ackermann_msgs.msg import AckermannDriveStamped
 from mocap4r2_msgs.msg import RigidBodies
 from nav_msgs.msg import Odometry, Path
+from std_msgs.msg import Float32
 from visualization_msgs.msg import Marker
 
 from reactive_car.srv import GenerateNominalTrajectory
@@ -32,10 +33,11 @@ class NeuralODEController(Node):
         self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.odometry_publisher: Publisher = self.create_publisher(Odometry, '/car_odom', 1)
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
+        self.barrier_publisher: Publisher = self.create_publisher(Float32, '/barrer', 10)
         self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
         self.track_point_publisher: Publisher = self.create_publisher(Marker, '/track_point', 10)
-        self.ellipse_publisher: Publisher = self.create_publisher(Marker, '/ellipse_marker', 10)
-        self.create_timer(1.0, self.publish_ellipse)
+        self.obstacle_publisher: Publisher = self.create_publisher(Marker, '/obstacle_marker', 10)
+        self.create_timer(1.0, self.publish_obstacle)
 
         self.latest_position: Vector3 | None = None
         self.latest_quaternion: Quaternion | None = None
@@ -58,8 +60,8 @@ class NeuralODEController(Node):
         # obstacle parameters
         self.a: float = 0.2
         self.b: float = 0.2
-        self.gamma: float = 5.0
-        self.ellipse_center: Tuple[float, float] = (3.0, 0.0)
+        self.gamma: float = 20.0
+        self.obstacle_center: Tuple[float, float] = (3.0, 0.0)
 
         # control lyapunov function parameters
         self.alpha: float = 100.0
@@ -224,6 +226,12 @@ class NeuralODEController(Node):
         min_index = np.argmin([control[2] for control in controls])
         u_safe, control_safe, residual_control_norm_safe = controls[min_index]
 
+        # publish the Barrier function value
+        barrier_value: float = self.control_boundary_function_2d(state)
+        barrier_msg: Float32 = Float32()
+        barrier_msg.data = barrier_value
+        self.barrier_publisher.publish(barrier_msg)
+
         # visualize the trackpoint
         marker: Marker = Marker()
         marker.header.frame_id = 'map'
@@ -339,7 +347,7 @@ class NeuralODEController(Node):
         Returns:
             b_x (np.ndarray): The control barrier function
         """
-        b_x: float = ((state[0][0] - self.ellipse_center[0]) / self.a)**2 - ((state[1][0] - self.ellipse_center[1]) / self.b)**2 - 1
+        b_x: float = ((state[0][0] - self.obstacle_center[0]) / self.a)**2 - ((state[1][0] - self.obstacle_center[1]) / self.b)**2 - 1
         return b_x
 
     def control_boundary_function_gradient_2d(self, state: np.ndarray) -> casadi.DM:
@@ -352,8 +360,8 @@ class NeuralODEController(Node):
             db_dx (casadi.DM): The gradient of the control barrier function
         """
         db_dx: casadi.DM = casadi.DM(3, 1)
-        db_dx[0] = 2 * (state[0] - self.ellipse_center[0]) / (self.a**2)
-        db_dx[1] = 2 * (state[1] - self.ellipse_center[1]) / (self.b**2)
+        db_dx[0] = 2 * (state[0] - self.obstacle_center[0]) / (self.a**2)
+        db_dx[1] = 2 * (state[1] - self.obstacle_center[1]) / (self.b**2)
         db_dx[2] = 0
         return db_dx
 
@@ -413,21 +421,21 @@ class NeuralODEController(Node):
         cosy_cosp: float = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
         return math.atan2(siny_cosp, cosy_cosp)
     
-    def publish_ellipse(self):
+    def publish_obstacle(self):
         marker = Marker()
         marker.header.frame_id = "map"
         marker.header.stamp = self.get_clock().now().to_msg()
-        marker.ns = "ellipse"
+        marker.ns = "obstacle"
         marker.id = 0
         marker.type = Marker.LINE_STRIP
         marker.action = Marker.ADD
-        marker.scale.x = 0.01  # Line width
+        marker.scale.x = 0.05  # Line width
         marker.color.a = 1.0
         marker.color.r = 1.0
         marker.color.g = 0.0
         marker.color.b = 0.0
 
-        center_x, center_y = self.ellipse_center
+        center_x, center_y = self.obstacle_center
         a, b = self.a, self.b
 
         for theta in np.linspace(0, 2 * math.pi, 100):
@@ -440,7 +448,7 @@ class NeuralODEController(Node):
             point.z = 0.0
             marker.points.append(point)
 
-        self.ellipse_publisher.publish(marker)
+        self.obstacle_publisher.publish(marker)
 
 
 def main(args=None):
