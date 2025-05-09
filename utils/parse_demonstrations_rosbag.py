@@ -129,7 +129,7 @@ def visualize_control_history(control_history):
 
 if __name__ == "__main__":
     filepath = os.path.dirname(os.path.abspath(__file__))
-    rosbag_path = f"{filepath}/../data/real_data/rosbag2_2025_04_11-23_21_31"
+    rosbag_path = f"{filepath}/../data/real_data/teleop_demonstrations"
     out_dir = f"{filepath}/../data/real_data/"
     rigid_body_name = "racecar_vroom.racecar_vroom"
     ackermann_messages = load_messages(rosbag_path, "/ackermann_cmd", "ackermann_msgs/msg/AckermannDriveStamped")

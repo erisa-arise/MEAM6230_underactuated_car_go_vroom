@@ -29,11 +29,12 @@ class NeuralODEController(Node):
     def __init__(self) -> None:
         super().__init__('Neural_ODE_Controller')
         self.srv = self.create_service(GenerateNominalTrajectory,'generate_nominal_trajectory',self.generate_nominal_trajectory_callback)
-        # self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/rigid_bodies', self.odom_callback, 10)
-        self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
+        self.odom_subscriber: Subscription = self.create_subscription(RigidBodies, '/rigid_bodies', self.odom_callback, 10)
+        # self.odom_subscriber: Subscription = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
         self.odometry_publisher: Publisher = self.create_publisher(Odometry, '/car_odom', 1)
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.lyaponuv_publisher: Publisher = self.create_publisher(Float32, '/lyapunov', 10)
+        self.barrier_publisher: Publisher = self.create_publisher(Float32, '/barrer', 10)
         self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
         self.track_point_publisher: Publisher = self.create_publisher(Marker, '/track_point', 10)
         self.ellipse_publisher: Publisher = self.create_publisher(Marker, '/ellipse_marker', 10)
@@ -58,10 +59,10 @@ class NeuralODEController(Node):
         self.lambda_: float = 5.0         
         
         # control barrier function parameters
-        self.a: float = 3.5
-        self.b: float = 2.5
-        self.gamma: float = 5.0
-        self.ellipse_center: Tuple[float, float] = (0.5, 0.0)
+        self.a: float = 0.4
+        self.b: float = 0.4
+        self.gamma: float = 1.0
+        self.ellipse_center: Tuple[float, float] = (1.0, -1.44)
 
         # control lyapunov function parameters
         self.alpha: float = 100.0
@@ -222,15 +223,21 @@ class NeuralODEController(Node):
             residual_control_norm = (u_opt[0]/self.v_max)**2 + (u_opt[1]/self.v_max)**2 + (u_opt[2]/self.delta_max)**2
             controls.append((u_opt, control_opt, residual_control_norm))
 
-        # publish the Lyapunov function value
+        # choose the smallest residual control
+        min_index = np.argmin([control[2] for control in controls])
+        u_safe, control_safe, residual_control_norm_safe = controls[min_index]
+
+        #publish the Lyapunov function value
         lyapunov_value: float = self.control_lyapunov_function_2d(state, track_points[:, min_index:min_index+1])
         lyapunov_msg: Float32 = Float32()
         lyapunov_msg.data = lyapunov_value
         self.lyaponuv_publisher.publish(lyapunov_msg)
 
-        # choose the smallest residual control
-        min_index = np.argmin([control[2] for control in controls])
-        u_safe, control_safe, residual_control_norm_safe = controls[min_index]
+        # publish the Barrier function value
+        barrier_value: float = self.control_boundary_function_2d(state)
+        barrier_msg: Float32 = Float32()
+        barrier_msg.data = barrier_value
+        self.barrier_publisher.publish(barrier_msg)
 
         # visualize the trackpoint
         marker: Marker = Marker()
@@ -301,16 +308,16 @@ class NeuralODEController(Node):
         
         # input limit constriants
         constraints.append(control)
-        actuation_lower_bound: np.ndarray = np.array([-0.2, -self.delta_max])
+        actuation_lower_bound: np.ndarray = np.array([-self.v_max, -self.delta_max])
         actuation_upper_bound: np.ndarray = np.array([self.v_max, self.delta_max])
 
         # CLF and CBF constraint
         constraints.append(casadi.dot(self.control_lyapunov_function_gradient_2d(state, track_point), state_xdot - track_point_xdot + u) - epsilon)
-        # constraints.append(casadi.dot(self.control_boundary_function_gradient_2d(state), state_xdot + u))
-        clf_cbf_lower_bound: np.ndarray = np.array([-casadi.inf])
-                                                    # -self.gamma*self.control_boundary_function_2d(state)])
-        clf_cbf_upper_bound: np.ndarray = np.array([-self.alpha*self.control_lyapunov_function_2d(state, track_point)])
-                                                    # casadi.inf])
+        constraints.append(casadi.dot(self.control_boundary_function_gradient_2d(state), state_xdot + u))
+        clf_cbf_lower_bound: np.ndarray = np.array([-casadi.inf,
+                                                    -self.gamma*self.control_boundary_function_2d(state)])
+        clf_cbf_upper_bound: np.ndarray = np.array([-self.alpha*self.control_lyapunov_function_2d(state, track_point),
+                                                    casadi.inf])
 
         # Dynamics Constraint
         constraints.append(state_xdot[0] + u[0] - control[0]*np.cos(state[2]))
@@ -348,7 +355,7 @@ class NeuralODEController(Node):
         Returns:
             b_x (np.ndarray): The control barrier function
         """
-        b_x: float = 1 - ((state[0][0] - self.ellipse_center[0]) / self.a)**2 - ((state[1][0] - self.ellipse_center[1]) / self.b)**2
+        b_x: float = ((state[0][0] - self.ellipse_center[0]) / self.a)**2 - ((state[1][0] - self.ellipse_center[1]) / self.b)**2 -1
         return b_x
 
     def control_boundary_function_gradient_2d(self, state: np.ndarray) -> casadi.DM:
@@ -361,8 +368,8 @@ class NeuralODEController(Node):
             db_dx (casadi.DM): The gradient of the control barrier function
         """
         db_dx: casadi.DM = casadi.DM(3, 1)
-        db_dx[0] = -2 * (state[0] - self.ellipse_center[0]) / (self.a**2)
-        db_dx[1] = -2 * (state[1] - self.ellipse_center[1]) / (self.b**2)
+        db_dx[0] = 2 * (state[0] - self.ellipse_center[0]) / (self.a**2)
+        db_dx[1] = 2 * (state[1] - self.ellipse_center[1]) / (self.b**2)
         db_dx[2] = 0
         return db_dx
 
