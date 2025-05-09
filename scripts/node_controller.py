@@ -13,7 +13,7 @@ from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
 
-from geometry_msgs.msg import Quaternion, Vector3, PoseStamped, Point
+from geometry_msgs.msg import Quaternion, Vector3, PoseStamped, PointStamped, Point
 from ackermann_msgs.msg import AckermannDriveStamped
 from mocap4r2_msgs.msg import RigidBodies
 from nav_msgs.msg import Odometry, Path
@@ -35,6 +35,7 @@ class NeuralODEController(Node):
         self.ackermann_publisher: Publisher = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.lyaponuv_publisher: Publisher = self.create_publisher(Float32, '/lyapunov', 10)
         self.barrier_publisher: Publisher = self.create_publisher(Float32, '/barrer', 10)
+        self.closest_point_publisher: Publisher = self.create_publisher(PointStamped, '/closest_point', 10)
         self.nominal_trajectory_publisher: Publisher = self.create_publisher(Path, '/nominal_trajectory', 10)
         self.track_point_publisher: Publisher = self.create_publisher(Marker, '/track_point', 10)
         self.ellipse_publisher: Publisher = self.create_publisher(Marker, '/ellipse_marker', 10)
@@ -65,7 +66,7 @@ class NeuralODEController(Node):
         self.ellipse_center: Tuple[float, float] = (1.0, -1.44)
 
         # control lyapunov function parameters
-        self.alpha: float = 100.0
+        self.alpha: float = 20.0
         self.lookahead_index: int = 20
 
         # trajectory rollout parameters
@@ -275,6 +276,16 @@ class NeuralODEController(Node):
             track_points (np.ndarray): The next self.lookahead_index points on the track
         """
         closest_index: int = np.argmin(np.linalg.norm(self.nominal_trajectory[:2, :] - state[:2, :], axis=0)) + 10
+        closest_point = self.nominal_trajectory[:, closest_index - 10]
+        # publish the closest point
+        closest_point_msg: PointStamped = PointStamped()
+        closest_point_msg.header.frame_id = 'map'
+        closest_point_msg.header.stamp = self.get_clock().now().to_msg()
+        closest_point_msg.point.x = float(closest_point[0])
+        closest_point_msg.point.y = float(closest_point[1])
+        closest_point_msg.point.z = 0.0
+        self.closest_point_publisher.publish(closest_point_msg)
+
         # print(f"closest_index: {closest_index}")
         track_points: np.ndarray = np.zeros((3, self.lookahead_index))
         for i in range(self.lookahead_index):
@@ -313,11 +324,11 @@ class NeuralODEController(Node):
 
         # CLF and CBF constraint
         constraints.append(casadi.dot(self.control_lyapunov_function_gradient_2d(state, track_point), state_xdot - track_point_xdot + u) - epsilon)
-        constraints.append(casadi.dot(self.control_boundary_function_gradient_2d(state), state_xdot + u))
-        clf_cbf_lower_bound: np.ndarray = np.array([-casadi.inf,
-                                                    -self.gamma*self.control_boundary_function_2d(state)])
-        clf_cbf_upper_bound: np.ndarray = np.array([-self.alpha*self.control_lyapunov_function_2d(state, track_point),
-                                                    casadi.inf])
+        # constraints.append(casadi.dot(self.control_boundary_function_gradient_2d(state), state_xdot + u))
+        clf_cbf_lower_bound: np.ndarray = np.array([-casadi.inf])
+                                                    # -self.gamma*self.control_boundary_function_2d(state)])
+        clf_cbf_upper_bound: np.ndarray = np.array([-self.alpha*self.control_lyapunov_function_2d(state, track_point)])
+                                                    # casadi.inf])
 
         # Dynamics Constraint
         constraints.append(state_xdot[0] + u[0] - control[0]*np.cos(state[2]))
@@ -355,7 +366,7 @@ class NeuralODEController(Node):
         Returns:
             b_x (np.ndarray): The control barrier function
         """
-        b_x: float = ((state[0][0] - self.ellipse_center[0]) / self.a)**2 - ((state[1][0] - self.ellipse_center[1]) / self.b)**2 -1
+        b_x: float = ((state[0][0] - self.ellipse_center[0]) / self.a)**2 - ((state[1][0] - self.ellipse_center[1]) / self.b)**2
         return b_x
 
     def control_boundary_function_gradient_2d(self, state: np.ndarray) -> casadi.DM:

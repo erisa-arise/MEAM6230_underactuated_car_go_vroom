@@ -60,7 +60,7 @@ class NeuralODEController(Node):
         # obstacle parameters
         self.a: float = 0.2
         self.b: float = 0.2
-        self.gamma: float = 20.0
+        self.gamma: float = 5.0
         self.obstacle_center: Tuple[float, float] = (3.0, 0.0)
 
         # control lyapunov function parameters
