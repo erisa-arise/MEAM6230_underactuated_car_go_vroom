@@ -140,7 +140,7 @@ def visualize_se(state_history, closest_point_history, time_history):
 
 if __name__ == "__main__":
     filepath = os.path.dirname(os.path.abspath(__file__))
-    rosbag_path = f"{filepath}/../data/real_data/hardware_tests/nominal3"
+    rosbag_path = f"{filepath}/../data/real_data/hardware_tests/nominal5"
     rigid_body_name = "f1tenth_car.f1tenth_car"
     rigid_body_messages = load_messages(rosbag_path, "/rigid_bodies", "mocap4r2_msgs/msg/RigidBodies")
     closest_point_messages = load_messages(rosbag_path, "/closest_point", "geometry_msgs/msg/PointStamped")
@@ -149,9 +149,17 @@ if __name__ == "__main__":
     state_history, closest_point_history, time_history = generate_dataset(pose_data, closest_point_data)
 
     # drop the first 40 samples of each
-    state_history = state_history[:, :]
-    closest_point_history = closest_point_history[:, :]
-    time_history = time_history[:]
+    state_history = state_history[:320, :]
+    closest_point_history = closest_point_history[:320, :]
+    time_history = time_history[:320]
+
+    # trim last 50 for nominal3
+    # trim last 50 for nominal4
+    # trim last 61 for nominal5 both loops
+    # keep first 320 for nominal5 first loop 
+    # trim first 320 and last 61 for nominal5 second loop 
+
+
     
     visualize_bev(state_history)
     visualize_state_history(time_history, state_history)
