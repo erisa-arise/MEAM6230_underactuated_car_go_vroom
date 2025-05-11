@@ -23,7 +23,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 # ament_python_install_package(${PROJECT_NAME})
 
 install(PROGRAMS
-  scripts/node_controller.py
+  scripts/neural_controller.py
   scripts/verify_clf.py
   scripts/verify_cbf.py
   scripts/publish_data_path.py
