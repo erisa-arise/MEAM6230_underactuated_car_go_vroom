@@ -1,4 +1,4 @@
-Negative Obstacle Detection
+Reactive Car
 =============
 
 This repository provides a package containing an adaptive and reactive neural controller for an Ackermann car system.
