@@ -78,40 +78,55 @@ def generate_dataset(rigid_body_data, closest_point_data):
             time_history.append(closest_point_stamp)   
     return np.array(state_history), np.array(closest_point_history), np.array(time_history)
 
-def visualize_bev(state_history):
-    fig, ax = plt.subplots()
-    
-    # Add ellipse to represent boundary function
+def visualize_bev(state_history3, closest_point_history3,
+                  state_history4, closest_point_history4,
+                  state_history5_first, closest_point_history5_first,
+                  state_history5_second, closest_point_history5_second):
+    fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+    axs = axs.flatten()
+
+    # Ellipse parameters
     theta = np.linspace(0, 2 * np.pi, 100)
     a, b = 3.5, 2.5
     x0, y0 = 0.5, 0.0
-    x = x0 + a * np.cos(theta)
-    y = y0 + b * np.sin(theta)
-    ax.plot(x, y, 'b--', label='Ellipse')
+    ellipse_x = x0 + a * np.cos(theta)
+    ellipse_y = y0 + b * np.sin(theta)
 
-    state_history_size = state_history.shape[0]
-    ax.plot(state_history[:state_history_size, 0],
-            state_history[:state_history_size, 1], 'ro', label='State History')
+    histories = [
+        (state_history3, closest_point_history3, 'ro', '1st Experiment Odometry'),
+        (state_history4, closest_point_history4, 'o', '2nd Experiment Odometry', '#800080'),
+        (state_history5_first, closest_point_history5_first, 'bo', '3rd Experiment Odometry'),
+        (state_history5_second, closest_point_history5_second, 'o', '4th Experiment Odometry', '#FF1493'),
+    ]
 
-    ax.set_xlabel('X Position')
-    ax.set_ylabel('Y Position')
-    ax.set_title('State History')
-    ax.legend()
-    return fig, ax
+    for i, ax in enumerate(axs):
+        state_history, closest_points, marker_style, label = histories[i][:4]
+        color = histories[i][4] if len(histories[i]) > 4 else marker_style[0]
+
+        ax.plot(ellipse_x, ellipse_y, 'r--', label='Boundary Function')
+        ax.plot(closest_points[:, 0], closest_points[:, 1], 'o', color='#39FF14', label='Closest Points')
+        ax.plot(state_history[:, 0], state_history[:, 1], marker_style, color=color, label="Odometry")
+        ax.set_xlabel('X Position')
+        ax.set_ylabel('Y Position')
+        ax.set_title(label)
+        ax.legend(loc='upper left')
+        ax.set_aspect('equal')
+
+    plt.tight_layout()
+    return fig, axs
 
 def visualize_state_history(time_history, state_history):
-    state_history_size = state_history.shape[0]
     time_history = np.array(time_history)
     time_history = (time_history - time_history[0])
     
     fig, ax = plt.subplots(3, 1, figsize=(8, 6), sharex=True)
-    ax[0].plot(time_history, state_history[:state_history_size, 0], 'r-')
+    ax[0].plot(time_history, state_history[:, 0], 'r-')
     ax[0].set_title('X Position History')
     ax[0].set_ylabel('X Position')
-    ax[1].plot(time_history, state_history[:state_history_size, 1], 'b-')
+    ax[1].plot(time_history, state_history[:, 1], 'b-')
     ax[1].set_title('Y Position History')
     ax[1].set_ylabel('Y Position')
-    ax[2].plot(time_history, np.cos(state_history[:state_history_size, 2]), 'g-')
+    ax[2].plot(time_history, np.cos(state_history[:, 2]), 'g-')
     ax[2].set_title('Cosine Yaw History')
     ax[2].set_xlabel('Time Step')
     ax[2].set_ylabel('Yaw')
@@ -140,29 +155,44 @@ def visualize_se(state_history, closest_point_history, time_history):
 
 if __name__ == "__main__":
     filepath = os.path.dirname(os.path.abspath(__file__))
-    rosbag_path = f"{filepath}/../data/real_data/hardware_tests/nominal5"
+    nominal3_path = f"{filepath}/../data/real_data/hardware_tests/nominal3"
+    nominal4_path = f"{filepath}/../data/real_data/hardware_tests/nominal4"
+    nominal5_path = f"{filepath}/../data/real_data/hardware_tests/nominal5"
+
     rigid_body_name = "f1tenth_car.f1tenth_car"
-    rigid_body_messages = load_messages(rosbag_path, "/rigid_bodies", "mocap4r2_msgs/msg/RigidBodies")
-    closest_point_messages = load_messages(rosbag_path, "/closest_point", "geometry_msgs/msg/PointStamped")
 
-    pose_data, closest_point_data = reduce_data(rigid_body_messages, rigid_body_name, closest_point_messages)
-    state_history, closest_point_history, time_history = generate_dataset(pose_data, closest_point_data)
+    rigid_body_messages3 = load_messages(nominal3_path, "/rigid_bodies", "mocap4r2_msgs/msg/RigidBodies")
+    closest_point_messages3 = load_messages(nominal3_path, "/closest_point", "geometry_msgs/msg/PointStamped")
+    pose_data3, closest_point_data3 = reduce_data(rigid_body_messages3, rigid_body_name, closest_point_messages3)
+    state_history3, closest_point_history3, time_history3 = generate_dataset(pose_data3, closest_point_data3)
+    state_history3 = state_history3[:-50, :]
+    closest_point_history3 = closest_point_history3[:-50, :]
+    time_history3 = time_history3[:-50]
 
-    # drop the first 40 samples of each
-    state_history = state_history[:320, :]
-    closest_point_history = closest_point_history[:320, :]
-    time_history = time_history[:320]
+    rigid_body_messages4 = load_messages(nominal4_path, "/rigid_bodies", "mocap4r2_msgs/msg/RigidBodies")
+    closest_point_messages4 = load_messages(nominal4_path, "/closest_point", "geometry_msgs/msg/PointStamped")
+    pose_data4, closest_point_data4 = reduce_data(rigid_body_messages4, rigid_body_name, closest_point_messages4)
+    state_history4, closest_point_history4, time_history4 = generate_dataset(pose_data4, closest_point_data4)
+    state_history4 = state_history4[:-50, :]
+    closest_point_history4 = closest_point_history4[:-50, :]
+    time_history4 = time_history4[:-50]
 
-    # trim last 50 for nominal3
-    # trim last 50 for nominal4
-    # trim last 61 for nominal5 both loops
-    # keep first 320 for nominal5 first loop 
-    # trim first 320 and last 61 for nominal5 second loop 
-
-
+    rigid_body_messages5 = load_messages(nominal5_path, "/rigid_bodies", "mocap4r2_msgs/msg/RigidBodies")
+    closest_point_messages5 = load_messages(nominal5_path, "/closest_point", "geometry_msgs/msg/PointStamped")
+    pose_data5, closest_point_data5 = reduce_data(rigid_body_messages5, rigid_body_name, closest_point_messages5)
+    state_history5, closest_point_history5, time_history5 = generate_dataset(pose_data5, closest_point_data5)
+    state_history5_first = state_history5[:320, :]
+    closest_point_history5_first = closest_point_history5[:320, :]
+    time_history5_first = time_history5[:320]
+    state_history5_second = state_history5[320:-61, :]
+    closest_point_history5_second = closest_point_history5[320:-61, :]
+    time_history5_second = time_history5[320:-61]
     
-    visualize_bev(state_history)
-    visualize_state_history(time_history, state_history)
-    squared_error = visualize_se(state_history, closest_point_history, time_history)
-    print(f"Mean Squared Error: {np.mean(squared_error)}")
+    visualize_bev(state_history3, closest_point_history3,
+                  state_history4, closest_point_history4,
+                  state_history5_first, closest_point_history5_first,
+                  state_history5_second, closest_point_history5_second)
+    # visualize_state_history(time_history3, state_history3)
+    # squared_error = visualize_se(state_history3, closest_point_history, time_history3)
+    # print(f"Mean Squared Error: {np.mean(squared_error)}")
     plt.show()

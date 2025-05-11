@@ -58,7 +58,7 @@ def main():
     mpl.rcParams['grid.alpha'] = 0.3
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(barrier_times[50:-50], barrier_data[50:-50], label='Barrier Value', color='#007acc', linewidth=2)
+    ax.plot(barrier_times[50:-25], barrier_data[50:-25], label='Barrier Value', color='#007acc', linewidth=2)
 
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("B(x)")
