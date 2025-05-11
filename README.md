@@ -3,7 +3,7 @@ Reactive Car
 
 This repository provides a package containing an adaptive and reactive neural controller for an Ackermann car system.
 
-### Install and Build Package?
+### Install and Build Package:
 ```
 git clone https://github.com/erisa-arise/MEAM6230_Underactuated_ODE.git
 cd MEAM6230_Underactuated_ODE
