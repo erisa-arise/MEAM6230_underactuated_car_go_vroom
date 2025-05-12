@@ -60,10 +60,10 @@ class NeuralODEController(Node):
         self.lambda_: float = 5.0         
         
         # control barrier function parameters
-        self.a: float = 0.4
-        self.b: float = 0.4
-        self.gamma: float = 1.0
-        self.ellipse_center: Tuple[float, float] = (1.0, -1.44)
+        self.a: float = 3.5
+        self.b: float = 2.5
+        self.gamma: float = 5.0
+        self.ellipse_center: Tuple[float, float] = (0.5, 0.0)
 
         # control lyapunov function parameters
         self.alpha: float = 20.0
@@ -324,11 +324,11 @@ class NeuralODEController(Node):
 
         # CLF and CBF constraint
         constraints.append(casadi.dot(self.control_lyapunov_function_gradient_2d(state, track_point), state_xdot - track_point_xdot + u) - epsilon)
-        # constraints.append(casadi.dot(self.control_boundary_function_gradient_2d(state), state_xdot + u))
-        clf_cbf_lower_bound: np.ndarray = np.array([-casadi.inf])
-                                                    # -self.gamma*self.control_boundary_function_2d(state)])
-        clf_cbf_upper_bound: np.ndarray = np.array([-self.alpha*self.control_lyapunov_function_2d(state, track_point)])
-                                                    # casadi.inf])
+        constraints.append(casadi.dot(self.control_boundary_function_gradient_2d(state), state_xdot + u))
+        clf_cbf_lower_bound: np.ndarray = np.array([-casadi.inf,
+                                                    -self.gamma*self.control_boundary_function_2d(state)])
+        clf_cbf_upper_bound: np.ndarray = np.array([-self.alpha*self.control_lyapunov_function_2d(state, track_point),
+                                                    casadi.inf])
 
         # Dynamics Constraint
         constraints.append(state_xdot[0] + u[0] - control[0]*np.cos(state[2]))
@@ -366,7 +366,7 @@ class NeuralODEController(Node):
         Returns:
             b_x (np.ndarray): The control barrier function
         """
-        b_x: float = ((state[0][0] - self.ellipse_center[0]) / self.a)**2 - ((state[1][0] - self.ellipse_center[1]) / self.b)**2
+        b_x: float = 1.0 - ((state[0][0] - self.ellipse_center[0]) / self.a)**2 - ((state[1][0] - self.ellipse_center[1]) / self.b)**2
         return b_x
 
     def control_boundary_function_gradient_2d(self, state: np.ndarray) -> casadi.DM:
@@ -379,8 +379,8 @@ class NeuralODEController(Node):
             db_dx (casadi.DM): The gradient of the control barrier function
         """
         db_dx: casadi.DM = casadi.DM(3, 1)
-        db_dx[0] = 2 * (state[0] - self.ellipse_center[0]) / (self.a**2)
-        db_dx[1] = 2 * (state[1] - self.ellipse_center[1]) / (self.b**2)
+        db_dx[0] = -2 * (state[0] - self.ellipse_center[0]) / (self.a**2)
+        db_dx[1] = -2 * (state[1] - self.ellipse_center[1]) / (self.b**2)
         db_dx[2] = 0
         return db_dx
 
