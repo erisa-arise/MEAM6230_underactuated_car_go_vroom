@@ -6,13 +6,13 @@ import casadi as ca
 # Parameters
 dt = 0.05
 steps = 300
-alpha = 0.8
-R = 10.0  # Radius of circular trajectory
-ref_lookahead = 2.0  # Arc length to project forward
+alpha = 1.0
+R = 10.0  
+ref_lookahead = 2.0  
 obstacle_center = np.array([0.0, 10.5])
 obstacle_radius = 1.0
 safety_margin = 0.5
-sigma = 0.01  # Noise standard deviation
+sigma = 0.01 
 
 # Initial state
 state = np.array([10.0, 0.0])
