@@ -45,6 +45,7 @@ def cbf_qp_control(state, ref_point, u_nom, obstacle_center, obstacle_radius, sa
     ref_vector = ref_point - ca.DM([[x, y]]).T
     ref_vector /= ca.norm_2(ref_vector) 
     # calculate the hyperplane, in this case, the hyperplane is the tangent to the circle at the reference point
+    raise NotImplementedError("Have not figured out the constraint formulation yet")
     H = ca.vertcat(-ref_vector[1], ref_vector[0]) 
     rho = ca.mtimes(H.T, ca.DM_eye(2) - ca.mtimes(ref_vector, H.T) / ca.dot(H, ref_vector), u-u_nom)
 
