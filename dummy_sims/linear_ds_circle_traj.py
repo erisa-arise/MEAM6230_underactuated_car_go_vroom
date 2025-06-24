@@ -116,7 +116,7 @@ def update(frame):
     return point, trail, ref_dot
 
 ani = FuncAnimation(fig, update, frames=len(trajectory), interval=dt * 1000, blit=True)
-plt.title("Circular Path Tracking with Obstacle Avoidance via 1st-order CBF")
+plt.title("Fully Actuated Circular Path Tracking with Obstacle Avoidance via 1st-order CBF")
 plt.legend()
 plt.grid(True)
 plt.show()
