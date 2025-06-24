@@ -78,7 +78,7 @@ def project_reference(theta, arc_length, R):
     return R * np.array([np.cos(theta_ref), np.sin(theta_ref)]), theta_ref
 
 # PID nominal control for extended Dubins vehicle
-def compute_nominal_control(state, ref_point, ref_theta):
+def compute_nominal_control(state, ref_point):
     x, y, v, theta = state
     x_ref, y_ref = ref_point
 
