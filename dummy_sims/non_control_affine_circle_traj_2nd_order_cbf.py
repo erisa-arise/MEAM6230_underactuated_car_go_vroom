@@ -108,17 +108,16 @@ for _ in range(steps):
     u_nom = compute_nominal_control(state, ref_point)
     u_safe = hocbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin)
 
-    a, delta, omega = u_safe
-    x, y, v, theta = state
+    v, delta, omega = u_safe
+    x, y, theta = state
 
     # Euler integration of Dubins dynamics
     x += v * np.cos(theta) * dt + np.random.normal(0, sigma_pos)
     y += v * np.sin(theta) * dt + np.random.normal(0, sigma_pos)
-    v += a * dt + np.random.normal(0, sigma_vel)
     theta += v / L * np.tan(delta) * dt + np.random.normal(0, sigma_theta)
     theta = (theta + np.pi) % (2 * np.pi) - np.pi  # Normalize
 
-    state = np.array([x, y, v, theta])
+    state = np.array([x, y, theta])
     trajectory.append(state[:2].copy())
     ref_trajectory.append(ref_point.copy())
 
