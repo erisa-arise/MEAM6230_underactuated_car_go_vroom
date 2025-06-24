@@ -75,14 +75,16 @@ def compute_nominal_control(state, ref_point, ref_theta):
     x, y, theta = state
     x_ref, y_ref = ref_point
 
+    # Position Error
     dx = x_ref - x
     dy = y_ref - y
     pos_error = np.hypot(dx, dy)
 
-    # Desired heading to reference point
+    # Heading Error
     heading_desired = np.arctan2(dy, dx)
     heading_error = np.arctan2(np.sin(heading_desired - theta), np.cos(heading_desired - theta))
 
+    # Feedback Control
     v = kp_pos * pos_error
     omega = kp_theta * heading_error
     return np.array([v, omega])

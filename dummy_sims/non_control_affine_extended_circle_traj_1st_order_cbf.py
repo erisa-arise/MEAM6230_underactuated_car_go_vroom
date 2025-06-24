@@ -87,22 +87,21 @@ def compute_nominal_control(state, ref_point):
     x, y, v, theta = state
     x_ref, y_ref = ref_point
 
-    # --- Position Error ---
+    # Position Error
     dx = x_ref - x
     dy = y_ref - y
     d_pos = np.hypot(dx, dy)
 
-    # Desired heading to reference point
+    # Heading Error
     heading_desired = np.arctan2(dy, dx)
-    heading_error = np.arctan2(np.sin(heading_desired - theta), np.cos(heading_desired - theta))
+    d_theta = np.arctan2(np.sin(heading_desired - theta), np.cos(heading_desired - theta))
 
-    # --- Velocity Control (projected onto tangent direction) ---
+    # Velocity Error
     dv = v_ref - v
 
-    # --- Control Inputs ---
+    # Feedback Control
     a = kp_v * dv + kp_pos * d_pos 
-
-    delta = np.clip(kp_theta * heading_error, -np.pi/4, np.pi/4)
+    delta = np.clip(kp_theta * d_theta, -np.pi/4, np.pi/4)
     return np.array([a, delta])
 
 # Simulation loop
