@@ -11,6 +11,8 @@ ref_lookahead = 1.0
 obstacle_center = np.array([0.0, 10.5])
 obstacle_radius = 1.0
 safety_margin = 0.5
+sigma_pos = 0.01
+sigma_theta = 0.01
 
 # PID gains
 kp_pos = 1.5
@@ -97,9 +99,9 @@ for _ in range(steps):
     x, y, theta = state
 
     # Euler integration of Dubins dynamics
-    x += v * np.cos(theta) * dt
-    y += v * np.sin(theta) * dt
-    theta += omega * dt
+    x += v * np.cos(theta) * dt + np.random.normal(0, sigma_pos)
+    y += v * np.sin(theta) * dt + np.random.normal(0, sigma_pos)
+    theta += omega * dt + np.random.normal(0, sigma_theta)
     theta = (theta + np.pi) % (2 * np.pi) - np.pi  # Normalize
 
     state = np.array([x, y, theta])
