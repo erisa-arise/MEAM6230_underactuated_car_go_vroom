@@ -157,7 +157,7 @@ def update(frame):
     return point, trail, ref_dot
 
 ani = FuncAnimation(fig, update, frames=len(trajectory), interval=dt * 1000, blit=True)
-plt.title("Extended Control Affine Circle Trajectory with 1nd Order CBF")
+plt.title("Extended Non-Control Affine Circle Trajectory with 1nd Order CBF")
 plt.legend()
 plt.grid(True)
 plt.show()
