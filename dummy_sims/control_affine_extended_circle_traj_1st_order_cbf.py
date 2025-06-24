@@ -12,6 +12,9 @@ v_ref = 1.0
 obstacle_center = np.array([0.0, 10.5])
 obstacle_radius = 1.0
 safety_margin = 0.5
+sigma_pos = 0.01
+sigma_vel = 0.01
+sigma_theta = 0.01
 
 # PID gains
 kp_pos = 2.0
@@ -109,10 +112,10 @@ for _ in range(steps):
     x, y, v, theta = state
 
     # Euler integration of Dubins dynamics
-    x += v * np.cos(theta) * dt
-    y += v * np.sin(theta) * dt
-    v += a * dt
-    theta += omega * dt
+    x += v * np.cos(theta) * dt + np.random.normal(0, sigma_pos)
+    y += v * np.sin(theta) * dt + np.random.normal(0, sigma_pos)
+    v += a * dt + np.random.normal(0, sigma_vel)
+    theta += omega * dt + np.random.normal(0, sigma_theta)
     theta = (theta + np.pi) % (2 * np.pi) - np.pi  # Normalize
 
     state = np.array([x, y, v, theta])
