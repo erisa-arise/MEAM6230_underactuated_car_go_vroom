@@ -92,7 +92,7 @@ for _ in range(steps):
     closest_point, theta_closest = closest_point_on_circle(state, R)
     ref_point, theta_ref = project_reference(theta_closest, ref_lookahead, R)
 
-    u_nom = compute_nominal_control(state, ref_point, theta_ref)
+    u_nom = compute_nominal_control(state, ref_point)
     u_safe = cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin)
 
     v, omega = u_safe
