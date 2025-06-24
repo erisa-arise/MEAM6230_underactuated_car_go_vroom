@@ -12,6 +12,8 @@ v_ref = 1.0
 obstacle_center = np.array([0.0, 10.5])
 obstacle_radius = 1.0
 safety_margin = 0.5
+
+# Noise parameters
 sigma_pos = 0.01
 sigma_vel = 0.01
 sigma_theta = 0.01
