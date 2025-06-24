@@ -11,8 +11,6 @@ ref_lookahead = 1.0
 obstacle_center = np.array([0.0, 10.5])
 obstacle_radius = 1.0
 safety_margin = 0.5
-sigma_pos = 0.01
-sigma_theta = 0.01
 
 # PID gains
 kp_pos = 1.5
@@ -23,8 +21,7 @@ state = np.array([10.0, 0.0, np.pi / 2])
 trajectory = []
 ref_trajectory = []
 
-# First-order CBF QP solver for Dubins vehicle
-def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin=0.5, gamma=1.0):
+def cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_margin=0.5, gamma1=2.0, gamma2=1.0):
     x, y, theta = state
     x_o, y_o = obstacle_center
     r_s = obstacle_radius + safety_margin
@@ -41,11 +38,15 @@ def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin
     dx_dt = ca.vertcat(v * ca.cos(theta), v * ca.sin(theta), omega)
     dh_dt = ca.dot(dh_dx, dx_dt)
 
+    # Compute d²h/dt² symbolically
+    d2h_dt2 = 2 * v * (v + omega * (dy * ca.cos(theta) - dx * ca.sin(theta)))
+
+    # Total second-order CBF constraint
+    hocbf_constraint = d2h_dt2 +  gamma1 * dh_dt + gamma2 * h
+
     obj = ca.sumsqr(u - u_nom)
 
-    cbf_constraint = dh_dt + gamma * h
-
-    nlp = {"x": u, "f": obj, "g": cbf_constraint}
+    nlp = {"x": u, "f": obj, "g": hocbf_constraint}
     solver = ca.nlpsol("solver", "ipopt", nlp, {
         "ipopt.print_level": 0,
         "print_time": 0,
@@ -58,6 +59,7 @@ def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin
         return u_safe
     except RuntimeError:
         return u_nom  # fallback
+
 
 # Circle tracking helpers
 def closest_point_on_circle(state, R):
@@ -93,15 +95,15 @@ for _ in range(steps):
     ref_point, theta_ref = project_reference(theta_closest, ref_lookahead, R)
 
     u_nom = compute_nominal_control(state, ref_point, theta_ref)
-    u_safe = cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin)
+    u_safe = cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_margin)
 
     v, omega = u_safe
     x, y, theta = state
 
     # Euler integration of Dubins dynamics
-    x += v * np.cos(theta) * dt + np.random.normal(0, sigma_pos)
-    y += v * np.sin(theta) * dt + np.random.normal(0, sigma_pos)
-    theta += omega * dt + np.random.normal(0, sigma_theta)
+    x += v * np.cos(theta) * dt
+    y += v * np.sin(theta) * dt
+    theta += omega * dt
     theta = (theta + np.pi) % (2 * np.pi) - np.pi  # Normalize
 
     state = np.array([x, y, theta])
@@ -139,7 +141,7 @@ def update(frame):
     return point, trail, ref_dot
 
 ani = FuncAnimation(fig, update, frames=len(trajectory), interval=dt * 1000, blit=True)
-plt.title("Control Affine Circle Trajectory with 1st Order CBF")
+plt.title("Dubins Vehicle with PID + CBF Obstacle Avoidance")
 plt.legend()
 plt.grid(True)
 plt.show()

@@ -153,7 +153,7 @@ def update(frame):
     return point, trail, ref_dot
 
 ani = FuncAnimation(fig, update, frames=len(trajectory), interval=dt * 1000, blit=True)
-plt.title("Dubins Vehicle with PID + CBF Obstacle Avoidance")
+plt.title("Extended Control Affine Circle Trajectory with 2nd Order CBF")
 plt.legend()
 plt.grid(True)
 plt.show()

@@ -91,7 +91,7 @@ def update(frame):
     return point, trail
 
 ani = FuncAnimation(fig, update, frames=len(trajectory), interval=dt * 1000, blit=True)
-plt.title("Fully Actuated System with 1st-order CBF Obstacle Avoidance")
+plt.title("Fully Actuated Global Sink with 1st Order CBF")
 plt.legend()
 plt.grid(True)
 plt.show()
