@@ -46,10 +46,9 @@ def hocbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_marg
     dx_dt = ca.vertcat(v * ca.cos(theta), v * ca.sin(theta), omega)
     dh_dt = ca.dot(dh_dx, dx_dt)
 
-    d2h_dt2 = 2*a*(dx*np.cos(theta) + dy*np.sin(theta)) + 2*v**2 + 2*v*(-dx*np.sin(theta) + dy*np.cos(theta))*omega
+    d2h_dt2 = 2 * a * (dx * np.cos(theta) + dy * np.sin(theta)) + 2 * v**2 + 2 * v * (-dx * np.sin(theta) + dy * np.cos(theta)) * omega
 
-    obj = ca.sumsqr(u - u_nom)
-
+    # Total second-order CBF constraint
     hocbf_constraint = d2h_dt2 + gamma1 * dh_dt + gamma2 * h
 
     obj = ca.sumsqr(u - u_nom)

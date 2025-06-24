@@ -39,7 +39,7 @@ def cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_
     dh_dt = ca.dot(dh_dx, dx_dt)
 
     # Compute d²h/dt² symbolically
-    d2h_dt2 = 2 * v * (v + omega * (dy * ca.cos(theta) - dx * ca.sin(theta)))
+    d2h_dt2 = 2 * v**2 + 2 * v * (-dx * np.sin(theta) + dy * np.cos(theta)) * omega
 
     # Total second-order CBF constraint
     hocbf_constraint = d2h_dt2 +  gamma1 * dh_dt + gamma2 * h
