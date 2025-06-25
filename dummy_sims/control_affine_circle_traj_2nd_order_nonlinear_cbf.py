@@ -36,7 +36,7 @@ def cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_
     dx = x - x_o
     dy = y - y_o
     h = dx**2 + dy**2 - r_s**2
-    dh_dx = ca.vertcat(2 * dx, 2 * dy, 0)  # ∇h = [∂h/∂x, ∂h/∂y, ∂h/∂theta]
+    dh_dx = ca.vertcat(2 * dx, 2 * dy, 0) 
 
     v = ca.SX.sym("v")
     omega = ca.SX.sym("omega")
