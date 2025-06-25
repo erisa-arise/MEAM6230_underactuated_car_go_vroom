@@ -27,8 +27,7 @@ def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin
     h = dx**2 + dy**2 - r_s**2
 
     # Gradient of h
-    grad_h = np.array([2 * dx, 2 * dy])
-    grad_h = grad_h.reshape(1, 2)  # Row vector
+    grad_h = ca.vertcat([2 * dx, 2 * dy]) 
 
     # Define optimization variables
     u = ca.SX.sym("u", 2)
@@ -37,7 +36,7 @@ def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin
     obj = ca.sumsqr(u - u_nom)
 
     # Constraint: ∇h · u + γ h ≥ 0
-    cbf_constraint = ca.mtimes(grad_h, u)[0] + gamma * h
+    cbf_constraint = ca.dot(grad_h, u) + gamma * h
 
     nlp = {"x": u, "f": obj, "g": cbf_constraint}
     solver = ca.nlpsol("solver", "ipopt", nlp, {
