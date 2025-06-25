@@ -7,10 +7,14 @@ import casadi as ca
 dt = 0.05
 steps = 300
 R = 10.0  # Circular path radius
-ref_lookahead = 1.0
+ref_lookahead = 5
 obstacle_center = np.array([0.0, 10.5])
 obstacle_radius = 1.0
 safety_margin = 0.5
+v_max = 5
+omega_max = 2.5
+
+# Noise parameters
 sigma_pos = 0.01
 sigma_theta = 0.01
 
@@ -43,9 +47,20 @@ def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin
 
     obj = ca.sumsqr(u - u_nom)
 
-    cbf_constraint = dh_dt + gamma * h
+    constraints = []
 
-    nlp = {"x": u, "f": obj, "g": cbf_constraint}
+    # Input constraints
+    constraints.append(u)
+    input_lower_bound = ca.vertcat(-v_max, -omega_max)
+    input_upper_bound = ca.vertcat(v_max, omega_max)
+
+    # CBF constraint
+    cbf_constraint = dh_dt + gamma * h
+    constraints.append(cbf_constraint)
+    cbf_lower_bound = [0]
+    cbf_upper_bound = [ca.inf]
+
+    nlp = {"x": u, "f": obj, "g": ca.vertcat(*constraints)}
     solver = ca.nlpsol("solver", "ipopt", nlp, {
         "ipopt.print_level": 0,
         "print_time": 0,
@@ -53,10 +68,11 @@ def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin
     })
 
     try:
-        sol = solver(lbg=0, ubg=ca.inf)
+        sol = solver(lbg=ca.vertcat(input_lower_bound, cbf_lower_bound), ubg=ca.vertcat(input_upper_bound, cbf_upper_bound))
         u_safe = np.array(sol["x"].full()).flatten()
         return u_safe
     except RuntimeError:
+        print("QP solver failed, using nominal control")
         return u_nom  # fallback
 
 # Circle tracking helpers
