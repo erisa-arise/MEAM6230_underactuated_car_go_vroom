@@ -5,13 +5,16 @@ import casadi as ca
 
 # Parameters
 dt = 0.05
-steps = 300
+steps = 200
 R = 10.0  # Circular path radius
-ref_lookahead = 1.0
-v_ref = 1.0
+ref_lookahead = 4.0
+v_ref = 2.0
 obstacle_center = np.array([0.0, 10.5])
 obstacle_radius = 1.0
 safety_margin = 0.5
+a_max = 5
+v_max = 2.5
+omega_max = 2.5
 
 # Noise parameters
 sigma_pos = 0.01
@@ -45,15 +48,31 @@ def hocbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_marg
 
     dx_dt = ca.vertcat(v * ca.cos(theta), v * ca.sin(theta), omega)
     dh_dt = ca.dot(dh_dx, dx_dt)
+    d2h_dt2 = 2 * a * (dx * np.cos(theta) + dy * np.sin(theta)) + 2 * v**2 + 2 * v * (
+        -dx * np.sin(theta) + dy * np.cos(theta)) * omega
 
-    d2h_dt2 = 2 * a * (dx * np.cos(theta) + dy * np.sin(theta)) + 2 * v**2 + 2 * v * (-dx * np.sin(theta) + dy * np.cos(theta)) * omega
-
-    # Total second-order CBF constraint
     hocbf_constraint = d2h_dt2 + gamma1 * dh_dt + gamma2 * h
 
     obj = ca.sumsqr(u - u_nom)
 
-    nlp = {"x": u, "f": obj, "g": hocbf_constraint}
+    constraints = []
+
+    # Input Constraints
+    constraints.append(u)
+    input_lower_bound = ca.vertcat(-a_max, -omega_max)
+    input_upper_bound = ca.vertcat(a_max, omega_max)
+
+    # Max velocity constraint
+    constraints.append(v + a * dt)
+    velocity_lower_bound = [-v_max]
+    velocity_upper_bound = [v_max]
+
+    # CBF constraint
+    constraints.append(hocbf_constraint)
+    cbf_lower_bound = [0]
+    cbf_upper_bound = [ca.inf]
+
+    nlp = {"x": u, "f": obj, "g": ca.vertcat(*constraints)}
     solver = ca.nlpsol("solver", "ipopt", nlp, {
         "ipopt.print_level": 0,
         "print_time": 0,
@@ -61,10 +80,12 @@ def hocbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_marg
     })
 
     try:
-        sol = solver(lbg=0, ubg=ca.inf)
+        sol = solver(lbg=ca.vertcat(input_lower_bound, velocity_lower_bound, cbf_lower_bound), 
+                        ubg=ca.vertcat(input_upper_bound, velocity_upper_bound, cbf_upper_bound))
         u_safe = np.array(sol["x"].full()).flatten()
         return u_safe
     except RuntimeError:
+        print("QP solver failed, using nominal control")
         return u_nom  # fallback
 
 # Circle tracking helpers
@@ -105,7 +126,7 @@ for _ in range(steps):
     closest_point, theta_closest = closest_point_on_circle(state, R)
     ref_point, theta_ref = project_reference(theta_closest, ref_lookahead, R)
 
-    u_nom = compute_nominal_control(state, ref_point, theta_ref)
+    u_nom = compute_nominal_control(state, ref_point)
     u_safe = hocbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin)
 
     a, omega = u_safe
@@ -153,7 +174,7 @@ def update(frame):
     return point, trail, ref_dot
 
 ani = FuncAnimation(fig, update, frames=len(trajectory), interval=dt * 1000, blit=True)
-plt.title("Extended Control Affine Circle Trajectory with 1nd Order CBF")
+plt.title("Extended Control Affine Circle Trajectory with 1st Order CBF")
 plt.legend()
 plt.grid(True)
 plt.show()
