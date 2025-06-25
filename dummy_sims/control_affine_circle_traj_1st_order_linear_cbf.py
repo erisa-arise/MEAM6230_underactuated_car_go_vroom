@@ -6,7 +6,7 @@ import casadi as ca
 # Parameters
 dt = 0.05
 steps = 200
-R = 10.0 
+R = 10.0  # Circular path radius
 ref_lookahead = 4.0
 obstacle_center = np.array([0.0, 10.5])
 obstacle_radius = 1.0
@@ -27,9 +27,8 @@ state = np.array([10.0, 0.0, np.pi / 2])
 trajectory = []
 ref_trajectory = []
 
-# Second-order CBF QP solver for Dubins vehicle
-# NOTE: gamma1 = 2.0 works, but gamma1 = 1.0 gets stuck (both with gamma2 = 1.0)
-def cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_margin=0.5, gamma1=2.0, gamma2=1.0):
+# First-order CBF QP solver for Dubins vehicle
+def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin=0.5, gamma=1.0):
     x, y, theta = state
     x_o, y_o = obstacle_center
     r_s = obstacle_radius + safety_margin
@@ -45,8 +44,6 @@ def cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_
 
     dx_dt = ca.vertcat(v * ca.cos(theta), v * ca.sin(theta), omega)
     dh_dt = ca.dot(dh_dx, dx_dt)
-    # assumes 0 acceleration/instataneous velcoity
-    d2h_dt2 = 2 * v**2 + 2 * v * (-dx * np.sin(theta) + dy * np.cos(theta)) * omega 
 
     obj = ca.sumsqr(u - u_nom)
 
@@ -58,12 +55,10 @@ def cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_
     input_upper_bound = ca.vertcat(v_max, omega_max)
 
     # CBF constraint
-    hocbf_constraint = d2h_dt2 +  gamma1 * dh_dt + gamma2 * h
-    constraints.append(hocbf_constraint)
+    cbf_constraint = dh_dt + gamma * h
+    constraints.append(cbf_constraint)
     cbf_lower_bound = [0]
     cbf_upper_bound = [ca.inf]
-
-
 
     nlp = {"x": u, "f": obj, "g": ca.vertcat(*constraints)}
     solver = ca.nlpsol("solver", "ipopt", nlp, {
@@ -78,9 +73,8 @@ def cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_
         u_safe = np.array(sol["x"].full()).flatten()
         return u_safe
     except RuntimeError:
-        print("QP solver failed, returning nominal control")
+        print("QP solver failed, using nominal control")
         return u_nom  # fallback
-
 
 # Circle tracking helpers
 def closest_point_on_circle(state, R):
@@ -94,7 +88,7 @@ def project_reference(theta, arc_length, R):
     return R * np.array([np.cos(theta_ref), np.sin(theta_ref)]), theta_ref
 
 # PID nominal control for Dubins vehicle
-def compute_nominal_control(state, ref_point, ref_theta):
+def compute_nominal_control(state, ref_point):
     x, y, theta = state
     x_ref, y_ref = ref_point
 
@@ -105,11 +99,11 @@ def compute_nominal_control(state, ref_point, ref_theta):
 
     # Heading Error
     heading_desired = np.arctan2(dy, dx)
-    d_theta = np.arctan2(np.sin(heading_desired - theta), np.cos(heading_desired - theta))
+    heading_error = np.arctan2(np.sin(heading_desired - theta), np.cos(heading_desired - theta))
 
-    # Feedback Control
+    # Feedback ControlHigher Order
     v = kp_pos * pos_error
-    omega = kp_theta * d_theta
+    omega = kp_theta * heading_error
     return np.array([v, omega])
 
 # Simulation loop
@@ -117,8 +111,8 @@ for _ in range(steps):
     closest_point, theta_closest = closest_point_on_circle(state, R)
     ref_point, theta_ref = project_reference(theta_closest, ref_lookahead, R)
 
-    u_nom = compute_nominal_control(state, ref_point, theta_ref)
-    u_safe = cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_margin)
+    u_nom = compute_nominal_control(state, ref_point)
+    u_safe = cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin)
 
     v, omega = u_safe
     x, y, theta = state
@@ -127,7 +121,7 @@ for _ in range(steps):
     x += v * np.cos(theta) * dt + np.random.normal(0, sigma_pos)
     y += v * np.sin(theta) * dt + np.random.normal(0, sigma_pos)
     theta += omega * dt + np.random.normal(0, sigma_theta)
-    theta = (theta + np.pi) % (2 * np.pi) - np.pi 
+    theta = (theta + np.pi) % (2 * np.pi) - np.pi  # Normalize
 
     state = np.array([x, y, theta])
     trajectory.append(state[:2].copy())
@@ -155,7 +149,7 @@ ax.add_patch(circle)
 # Plot handles
 point, = ax.plot([], [], 'bo', label="Robot")
 trail, = ax.plot([], [], 'b-', lw=1, label="Path")
-ref_dot, = ax.plot([], [], 'gx', label="Ref Point") 
+ref_dot, = ax.plot([], [], 'gx', label="Ref Point")  # Green X
 
 def update(frame):
     point.set_data(trajectory[frame, 0], trajectory[frame, 1])
@@ -164,7 +158,7 @@ def update(frame):
     return point, trail, ref_dot
 
 ani = FuncAnimation(fig, update, frames=len(trajectory), interval=dt * 1000, blit=True)
-plt.title("Control Affine Circle Trajectory with 2st Order CBF")
+plt.title("Control Affine Circle Trajectory with 1st Order Linear CBF")
 plt.legend()
 plt.grid(True)
 plt.show()
