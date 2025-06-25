@@ -29,7 +29,7 @@ ref_trajectory = []
 
 # Second-order CBF QP solver for Dubins vehicle
 # NOTE: gamma1 = 2.0 works, but gamma1 = 1.0 gets stuck (both with gamma2 = 1.0)
-def cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_margin=0.5, gamma1=2.0, gamma2=1.0):
+def cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_margin=0.5, gamma1=1.0, gamma2=1.0):
     x, y, theta = state
     x_o, y_o = obstacle_center
     r_s = obstacle_radius + safety_margin
@@ -58,7 +58,7 @@ def cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_
     input_upper_bound = ca.vertcat(v_max, omega_max)
 
     # CBF constraint
-    hocbf_constraint = d2h_dt2 +  gamma1 * dh_dt + gamma2 * h
+    hocbf_constraint = d2h_dt2 + (gamma1 + gamma2) * dh_dt + gamma1 * gamma2 * h
     constraints.append(hocbf_constraint)
     cbf_lower_bound = [0]
     cbf_upper_bound = [ca.inf]
@@ -164,7 +164,7 @@ def update(frame):
     return point, trail, ref_dot
 
 ani = FuncAnimation(fig, update, frames=len(trajectory), interval=dt * 1000, blit=True)
-plt.title("Control Affine Circle Trajectory with 2st Order Nonlinear CBF")
+plt.title("Control Affine Circle Trajectory with 2nd Order Nonlinear CBF")
 plt.legend()
 plt.grid(True)
 plt.show()
