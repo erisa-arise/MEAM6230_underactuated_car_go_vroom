@@ -50,6 +50,7 @@ def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin
         u_safe = np.array(sol["x"].full()).flatten()
         return u_safe
     except RuntimeError:
+        print("QP solver failed, using nominal control")
         return u_nom  # fallback
 
 # Simulation loop
