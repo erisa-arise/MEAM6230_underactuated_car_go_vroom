@@ -5,13 +5,13 @@ import casadi as ca
 
 # Parameters
 dt = 0.05
-steps = 400
+steps = 200
 R = 10.0  # Circular path radius
-ref_lookahead = 1.0
+ref_lookahead = 4.0
 obstacle_center = np.array([0.0, 10.5])
 obstacle_radius = 1.0
 safety_margin = 0.5
-v_max = 1.5
+v_max = 2.5
 omega_max = 2.5
 
 # Noise parameters
@@ -27,6 +27,7 @@ state = np.array([10.0, 0.0, np.pi / 2])
 trajectory = []
 ref_trajectory = []
 
+# Second-order CBF QP solver for Dubins vehicle
 def cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_margin=0.5, gamma1=2.0, gamma2=1.0):
     x, y, theta = state
     x_o, y_o = obstacle_center
@@ -43,16 +44,27 @@ def cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_
 
     dx_dt = ca.vertcat(v * ca.cos(theta), v * ca.sin(theta), omega)
     dh_dt = ca.dot(dh_dx, dx_dt)
-
-    # Compute d²h/dt² symbolically
-    d2h_dt2 = 2 * v**2 + 2 * v * (-dx * np.sin(theta) + dy * np.cos(theta)) * omega
-
-    # Total second-order CBF constraint
-    hocbf_constraint = d2h_dt2 +  gamma1 * dh_dt + gamma2 * h
+    # assumes 0 acceleration/instataneous velcoity
+    d2h_dt2 = 2 * v**2 + 2 * v * (-dx * np.sin(theta) + dy * np.cos(theta)) * omega 
 
     obj = ca.sumsqr(u - u_nom)
 
-    nlp = {"x": u, "f": obj, "g": hocbf_constraint}
+    constraints = []
+
+    # Input constraints
+    constraints.append(u)
+    input_lower_bound = ca.vertcat(-v_max, -omega_max)
+    input_upper_bound = ca.vertcat(v_max, omega_max)
+
+    # CBF constraint
+    hocbf_constraint = d2h_dt2 +  gamma1 * dh_dt + gamma2 * h
+    constraints.append(hocbf_constraint)
+    cbf_lower_bound = [0]
+    cbf_upper_bound = [ca.inf]
+
+
+
+    nlp = {"x": u, "f": obj, "g": ca.vertcat(*constraints)}
     solver = ca.nlpsol("solver", "ipopt", nlp, {
         "ipopt.print_level": 0,
         "print_time": 0,
@@ -60,10 +72,12 @@ def cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_
     })
 
     try:
-        sol = solver(lbg=0, ubg=ca.inf)
+        sol = solver(lbg=ca.vertcat(input_lower_bound, cbf_lower_bound), 
+                        ubg=ca.vertcat(input_upper_bound, cbf_upper_bound))
         u_safe = np.array(sol["x"].full()).flatten()
         return u_safe
     except RuntimeError:
+        print("QP solver failed, returning nominal control")
         return u_nom  # fallback
 
 

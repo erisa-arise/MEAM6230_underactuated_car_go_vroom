@@ -7,7 +7,7 @@ import casadi as ca
 dt = 0.05
 steps = 200
 R = 10.0  # Circular path radius
-ref_lookahead = 4
+ref_lookahead = 4.0
 obstacle_center = np.array([0.0, 10.5])
 obstacle_radius = 1.0
 safety_margin = 0.5
@@ -68,7 +68,8 @@ def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin
     })
 
     try:
-        sol = solver(lbg=ca.vertcat(input_lower_bound, cbf_lower_bound), ubg=ca.vertcat(input_upper_bound, cbf_upper_bound))
+        sol = solver(lbg=ca.vertcat(input_lower_bound, cbf_lower_bound), 
+                        ubg=ca.vertcat(input_upper_bound, cbf_upper_bound))
         u_safe = np.array(sol["x"].full()).flatten()
         return u_safe
     except RuntimeError:
