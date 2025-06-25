@@ -31,7 +31,7 @@ state = np.array([10.0, 0.0, 0.0, np.pi / 2])
 trajectory = []
 ref_trajectory = []
 
-# First-order CBF QP solver for an extended Dubins vehicle
+# Second-order CBF QP solver for an extended Dubins vehicle
 def hocbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin=0.5, gamma1=1.0, gamma2=1.0):
     x, y, v, theta = state
     x_o, y_o = obstacle_center

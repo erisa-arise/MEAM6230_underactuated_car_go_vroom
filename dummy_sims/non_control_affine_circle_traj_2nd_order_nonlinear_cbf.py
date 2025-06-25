@@ -30,7 +30,7 @@ state = np.array([10.0, 0.0, np.pi / 2])
 trajectory = []
 ref_trajectory = []
 
-# First-order CBF QP solver for an extended Dubins vehicle
+# Second-order CBF Nonlinear solver for an extended Dubins vehicle
 def hocbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin=0.5, gamma1=1.0, gamma2=1.0):
     x, y, theta = state
     x_o, y_o = obstacle_center
@@ -48,7 +48,7 @@ def hocbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_marg
 
     dx_dt = ca.vertcat(v * ca.cos(theta), v * ca.sin(theta), v / L * ca.tan(delta))
     dh_dt = ca.dot(dh_dx, dx_dt)
-
+    # assumes 0 acceleration/instataneous velcoity
     d2h_dt2 = 2*v**2 + 2*v*(-dx*np.sin(theta) + dy*np.cos(theta))*omega
 
     obj = ca.sumsqr(u - u_nom)
