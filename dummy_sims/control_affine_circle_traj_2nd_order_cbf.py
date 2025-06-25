@@ -5,12 +5,18 @@ import casadi as ca
 
 # Parameters
 dt = 0.05
-steps = 300
+steps = 400
 R = 10.0  # Circular path radius
 ref_lookahead = 1.0
 obstacle_center = np.array([0.0, 10.5])
 obstacle_radius = 1.0
 safety_margin = 0.5
+v_max = 1.5
+omega_max = 2.5
+
+# Noise parameters
+sigma_pos = 0.01
+sigma_theta = 0.01
 
 # PID gains
 kp_pos = 1.5
@@ -103,10 +109,10 @@ for _ in range(steps):
     x, y, theta = state
 
     # Euler integration of Dubins dynamics
-    x += v * np.cos(theta) * dt
-    y += v * np.sin(theta) * dt
-    theta += omega * dt
-    theta = (theta + np.pi) % (2 * np.pi) - np.pi  # Normalize
+    x += v * np.cos(theta) * dt + np.random.normal(0, sigma_pos)
+    y += v * np.sin(theta) * dt + np.random.normal(0, sigma_pos)
+    theta += omega * dt + np.random.normal(0, sigma_theta)
+    theta = (theta + np.pi) % (2 * np.pi) - np.pi 
 
     state = np.array([x, y, theta])
     trajectory.append(state[:2].copy())
@@ -134,7 +140,7 @@ ax.add_patch(circle)
 # Plot handles
 point, = ax.plot([], [], 'bo', label="Robot")
 trail, = ax.plot([], [], 'b-', lw=1, label="Path")
-ref_dot, = ax.plot([], [], 'gx', label="Ref Point")  # Green X
+ref_dot, = ax.plot([], [], 'gx', label="Ref Point") 
 
 def update(frame):
     point.set_data(trajectory[frame, 0], trajectory[frame, 1])
