@@ -51,7 +51,7 @@ def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin
         return u_safe
     except RuntimeError:
         print("QP solver failed, using nominal control")
-        return u_nom  # fallback
+        return u_nom 
 
 # Simulation loop
 for _ in range(steps):

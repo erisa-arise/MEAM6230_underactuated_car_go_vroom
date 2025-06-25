@@ -38,7 +38,7 @@ def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin
     # Objective: minimize deviation from nominal
     obj = ca.sumsqr(u - u_nom)
 
-    # Constraint: ∇h · u + γ h ≥ 0
+    # CBF Constraint
     cbf_constraint = ca.dot(grad_h, u) + gamma * h
 
     nlp = {"x": u, "f": obj, "g": cbf_constraint}
@@ -54,7 +54,7 @@ def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin
         return u_safe
     except RuntimeError:
         print("QP solver failed, using nominal control")
-        return u_nom  # fallback
+        return u_nom 
 
 # Circular trajectory tracking helpers
 def closest_point_on_circle(state, R):
@@ -107,7 +107,7 @@ ax.add_patch(circle)
 # Plot handles
 point, = ax.plot([], [], 'bo', label="Robot")
 trail, = ax.plot([], [], 'b-', lw=1, label="Path")
-ref_dot, = ax.plot([], [], 'gx', label="Ref Point")  # Green X
+ref_dot, = ax.plot([], [], 'gx', label="Ref Point") 
 
 def update(frame):
     point.set_data(trajectory[frame, 0], trajectory[frame, 1])

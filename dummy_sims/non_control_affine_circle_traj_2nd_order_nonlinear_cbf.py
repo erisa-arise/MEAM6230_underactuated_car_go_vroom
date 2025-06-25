@@ -86,7 +86,7 @@ def hocbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_marg
         return u_safe
     except RuntimeError:
         print("QP solver failed, returning nominal control")
-        return u_nom  # fallback
+        return u_nom 
 
 # Circle tracking helpers
 def closest_point_on_circle(state, R):
@@ -133,7 +133,7 @@ for _ in range(steps):
     x += v * np.cos(theta) * dt + np.random.normal(0, sigma_pos)
     y += v * np.sin(theta) * dt + np.random.normal(0, sigma_pos)
     theta += v / L * np.tan(delta) * dt + np.random.normal(0, sigma_theta)
-    theta = (theta + np.pi) % (2 * np.pi) - np.pi  # Normalize
+    theta = (theta + np.pi) % (2 * np.pi) - np.pi 
 
     state = np.array([x, y, theta])
     trajectory.append(state[:2].copy())
@@ -161,7 +161,7 @@ ax.add_patch(circle)
 # Plot handles
 point, = ax.plot([], [], 'bo', label="Robot")
 trail, = ax.plot([], [], 'b-', lw=1, label="Path")
-ref_dot, = ax.plot([], [], 'gx', label="Ref Point")  # Green X
+ref_dot, = ax.plot([], [], 'gx', label="Ref Point")
 
 def update(frame):
     point.set_data(trajectory[frame, 0], trajectory[frame, 1])

@@ -30,10 +30,8 @@ def cbf_qp_control(state, ref_point, u_nom, obstacle_center, obstacle_radius, sa
     dx = x - x_o
     dy = y - y_o
     h = dx**2 + dy**2 - r_s**2
-    grad_h = np.array([2 * dx, 2 * dy])  # ∇h = [∂h/∂x, ∂h/∂y]
+    grad_h = np.array([2 * dx, 2 * dy])
 
-    # Dubins dynamics: \dot{x} = v cosθ, \dot{y} = v sinθ
-    # So: \dot{h} = ∇h · [v cosθ, v sinθ] = v (∂h/∂x cosθ + ∂h/∂y sinθ)
     v_sym = ca.SX.sym("v")
     omega_sym = ca.SX.sym("omega")
     u = ca.vertcat(v_sym, omega_sym)

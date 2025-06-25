@@ -78,7 +78,7 @@ def cbf_qp_control_hocbf(state, u_nom, obstacle_center, obstacle_radius, safety_
         return u_safe
     except RuntimeError:
         print("QP solver failed, returning nominal control")
-        return u_nom  # fallback
+        return u_nom
 
 
 # Circle tracking helpers
