@@ -51,7 +51,6 @@ def hocbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_marg
     d2h_dt2 = 2 * a * (dx * np.cos(theta) + dy * np.sin(theta)) + 2 * v**2 + 2 * v * (
         -dx * np.sin(theta) + dy * np.cos(theta)) * omega
 
-    # hocbf_constraint = d2h_dt2 + gamma1 * (dh_dt + gamma2 * h)
     hocbf_constraint = d2h_dt2 + (gamma1 + gamma2) * dh_dt + gamma1*gamma2 * h
 
     obj = ca.sumsqr(u - u_nom)
