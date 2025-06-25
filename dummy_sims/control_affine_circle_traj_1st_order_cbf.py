@@ -7,11 +7,11 @@ import casadi as ca
 dt = 0.05
 steps = 200
 R = 10.0  # Circular path radius
-ref_lookahead = 5
+ref_lookahead = 4
 obstacle_center = np.array([0.0, 10.5])
 obstacle_radius = 1.0
 safety_margin = 0.5
-v_max = 5
+v_max = 2.5
 omega_max = 2.5
 
 # Noise parameters
