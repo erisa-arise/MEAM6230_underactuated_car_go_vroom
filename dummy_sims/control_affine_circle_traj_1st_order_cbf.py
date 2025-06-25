@@ -5,12 +5,16 @@ import casadi as ca
 
 # Parameters
 dt = 0.05
-steps = 300
+steps = 400
 R = 10.0  # Circular path radius
-ref_lookahead = 1.0
+ref_lookahead = 1.5
 obstacle_center = np.array([0.0, 10.5])
 obstacle_radius = 1.0
 safety_margin = 0.5
+v_max = 1.5
+omega_max = 2.5
+
+# Noise parameters
 sigma_pos = 0.01
 sigma_theta = 0.01
 
@@ -23,40 +27,68 @@ state = np.array([10.0, 0.0, np.pi / 2])
 trajectory = []
 ref_trajectory = []
 
+def control_to_state_derivative(control):
+    v, omega = control
+    x_dot = v * np.cos(state[2])
+    y_dot = v * np.sin(state[2])
+    theta_dot = omega
+    return np.array([[x_dot, y_dot, theta_dot]]).T
+
 # First-order CBF QP solver for Dubins vehicle
 def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin=0.5, gamma=1.0):
     x, y, theta = state
     x_o, y_o = obstacle_center
     r_s = obstacle_radius + safety_margin
+    x_dot_nom = control_to_state_derivative(u_nom)
 
     dx = x - x_o
     dy = y - y_o
     h = dx**2 + dy**2 - r_s**2
     dh_dx = ca.vertcat(2 * dx, 2 * dy, 0)  # ∇h = [∂h/∂x, ∂h/∂y, ∂h/∂theta]
 
-    v = ca.SX.sym("v")
-    omega = ca.SX.sym("omega")
-    u = ca.vertcat(v, omega)
+    u = ca.MX.sym("u", 3)  # Control input x_dot, y_dot, omega
+    control = ca.MX.sym("control", 2)  # Control input v, omega
 
-    dx_dt = ca.vertcat(v * ca.cos(theta), v * ca.sin(theta), omega)
-    dh_dt = ca.dot(dh_dx, dx_dt)
+    Q = ca.diag([1/v_max, 1/v_max, 1/omega_max])
+    obj = ca.mtimes([u.T, Q, u])
 
-    obj = ca.sumsqr(u - u_nom)
+    constraints = []
 
-    cbf_constraint = dh_dt + gamma * h
+    # Input constraints
+    constraints.append(control)
+    actuation_lower_bounds = [-v_max, -omega_max]
+    actuation_upper_bounds = [v_max, omega_max]
 
-    nlp = {"x": u, "f": obj, "g": cbf_constraint}
+    # CBF constraint: ∇h · (u + u_nom) + γ h ≥ 0
+    cbf_constraint = ca.dot(dh_dx, u + x_dot_nom) + gamma * h
+    constraints.append(cbf_constraint)
+    cbf_lower_bounds = [0]
+    cbf_upper_bounds = [ca.inf]
+
+    # Dynamics Constraint: u = [v * cos(theta), v * sin(theta), omega]
+    constraints.append(x_dot_nom[0] + u[0] - control[0] * ca.cos(theta))
+    constraints.append(x_dot_nom[1] + u[1] - control[0] * ca.sin(theta))
+    constraints.append(x_dot_nom[2] + u[2] - control[1])
+    dynamics_lower_bounds = [0, 0, 0]
+    dynamics_upper_bounds = [0, 0, 0]
+
+    nlp = {"x": ca.vertcat(u, control), "f": obj, "g": ca.vertcat(*constraints)}
     solver = ca.nlpsol("solver", "ipopt", nlp, {
         "ipopt.print_level": 0,
         "print_time": 0,
         "ipopt.tol": 1e-6
     })
 
+    lower_bounds = ca.vertcat(actuation_lower_bounds, cbf_lower_bounds, dynamics_lower_bounds)
+    upper_bounds = ca.vertcat(actuation_upper_bounds, cbf_upper_bounds, dynamics_upper_bounds)
+
     try:
-        sol = solver(lbg=0, ubg=ca.inf)
+        sol = solver(lbg=lower_bounds, ubg=upper_bounds)
         u_safe = np.array(sol["x"].full()).flatten()
-        return u_safe
+        control_safe = u_safe[3:]
+        return control_safe
     except RuntimeError:
+        print("QP solver failed, using nominal control")
         return u_nom  # fallback
 
 # Circle tracking helpers
@@ -71,7 +103,7 @@ def project_reference(theta, arc_length, R):
     return R * np.array([np.cos(theta_ref), np.sin(theta_ref)]), theta_ref
 
 # PID nominal control for Dubins vehicle
-def compute_nominal_control(state, ref_point, ref_theta):
+def compute_nominal_control(state, ref_point):
     x, y, theta = state
     x_ref, y_ref = ref_point
 
