@@ -6,7 +6,7 @@ import casadi as ca
 # Parameters
 dt = 0.05
 steps = 200
-R = 10.0  # Circular path radius
+R = 10.0 
 ref_lookahead = 4.0
 obstacle_center = np.array([0.0, 10.5])
 obstacle_radius = 1.0
