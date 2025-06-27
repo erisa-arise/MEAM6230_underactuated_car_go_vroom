@@ -25,15 +25,14 @@ def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin
     dx = x - x_o
     dy = y - y_o
     h = dx**2 + dy**2 - r_s**2
+    dhdx = ca.vertcat([2 * dx, 2 * dy]) 
 
     u = ca.SX.sym("u", 2)
 
     obj = ca.sumsqr(u - u_nom)
 
-    grad_h = ca.vertcat([2 * dx, 2 * dy]) 
-
     # CBF Constraint
-    cbf_constraint = ca.dot(grad_h, u) + gamma * h
+    cbf_constraint = ca.dot(dhdx, u) + gamma * h
 
     nlp = {"x": u, "f": obj, "g": cbf_constraint}
     solver = ca.nlpsol("solver", "ipopt", nlp, {
