@@ -5,8 +5,8 @@ This repository provides a package containing an adaptive and reactive neural co
 
 ### Install and Build Package:
 ```
-git clone https://github.com/erisa-arise/MEAM6230_Underactuated_ODE.git
-cd MEAM6230_Underactuated_ODE
+git clone https://github.com/erisa-arise/MEAM6230_underactuated_car_go_vroom.git
+cd MEAM6230_underactuated_car_go_vroom
 colcon build
 source install/setup.bash
 ```
