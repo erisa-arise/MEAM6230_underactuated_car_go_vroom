@@ -5,8 +5,10 @@ This repository provides a package containing an adaptive and reactive neural co
 
 ### Install and Build Package:
 ```
+sudo apt install ros-${ROS_DISTRO}-ackermann-msgs
+git clone https://github.com/MOCAP4ROS2-Project/mocap4r2_msgs # mocap4r2_msgs required
 git clone https://github.com/erisa-arise/MEAM6230_underactuated_car_go_vroom.git
-cd MEAM6230_underactuated_car_go_vroom
+
 colcon build
 source install/setup.bash
 ```
