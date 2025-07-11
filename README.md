@@ -8,7 +8,7 @@ This repository provides a package containing an adaptive and reactive neural co
 - mocap4r2_msgs
 - pytorch
 - casadi
-- F1Tenth Gym: Follow instructions here: [https://github.com/f1tenth/f1tenth_gym ](https://github.com/f1tenth/f1tenth_gym_ros/tree/dev-dynamics)
+- F1Tenth Gym: Follow instructions for f1tenth_gym_ros [here](https://github.com/f1tenth/f1tenth_gym_ros/tree/dev-dynamics)
 
 ```
 sudo apt install ros-${ROS_DISTRO}-ackermann-msgs
