@@ -3,10 +3,22 @@ Reactive Car
 
 This repository provides a package containing an adaptive and reactive neural controller for an Ackermann car system.
 
-### Install and Build Package:
+### Prerequisites
+- ackermann_msgs
+- mocap4r2_msgs
+- pytorch
+- casadi
+- F1Tenth Gym: Follow instructions here: https://github.com/f1tenth/f1tenth_gym 
+
 ```
 sudo apt install ros-${ROS_DISTRO}-ackermann-msgs
-git clone https://github.com/MOCAP4ROS2-Project/mocap4r2_msgs # mocap4r2_msgs required
+git clone https://github.com/MOCAP4ROS2-Project/mocap4r2_msgs
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip3 install casadi
+```
+
+### Install and Build Package:
+```
 git clone https://github.com/erisa-arise/MEAM6230_underactuated_car_go_vroom.git
 
 colcon build
