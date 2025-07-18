@@ -2,21 +2,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import casadi as ca
+from matplotlib.patches import Ellipse
 
 # Parameters
 dt = 0.05
 steps = 200
 R = 10.0  # Circular path radius
 ref_lookahead = 4.0
-obstacle_center = np.array([0.0, 10.5])
-obstacle_radius = 1.0
-safety_margin = 0.5
+obstacle_center = np.array([0.0, 10])
+obstacle_axes = (1.0, 1.0)
 v_max = 2.5
 omega_max = 2.5
 
 # Noise parameters
-sigma_pos = 0.01
-sigma_theta = 0.01
+sigma_pos = 0.00
+sigma_theta = 0.00
 
 # PID gains
 kp_pos = 1.5
@@ -28,14 +28,13 @@ trajectory = []
 ref_trajectory = []
 
 # First-order CBF QP solver for Dubins vehicle
-def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin=0.5, gamma=1.0):
+def cbf_qp_control(state, u_nom, obstacle_center, obstacle_axes, gamma=1.0):
     x, y, theta = state
     x_o, y_o = obstacle_center
-    r_s = obstacle_radius + safety_margin
 
     dx = x - x_o
     dy = y - y_o
-    d_x = dx**2 + dy**2 - r_s**2
+    d_x = (dx/obstacle_axes[0])**2 + (dy/obstacle_axes[1])**2 - 1.0
     phi = np.arctan2(dy, dx)
 
     gamma_x = 2 + np.cos(theta - phi)
@@ -45,7 +44,7 @@ def cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin
     omega = ca.SX.sym("omega")
     u = ca.vertcat(v, omega)
 
-    dd_dt = 2*dx*v*np.cos(theta) + 2*dx*v*np.sin(theta)
+    dd_dt = (2*dx/obstacle_axes[0]**2)*v*np.cos(theta) + (2*dy/obstacle_axes[0]**2)*v*np.sin(theta)
     datan2_ddx = -dy / (dx**2 + dy**2)
     datan2_ddy = dx / (dx**2 + dy**2)
     dgamma_dt = -np.sin(theta - phi) * (omega - datan2_ddx*v*np.cos(theta) - datan2_ddy*v*np.sin(theta))
@@ -119,7 +118,7 @@ for _ in range(steps):
     ref_point, theta_ref = project_reference(theta_closest, ref_lookahead, R)
 
     u_nom = compute_nominal_control(state, ref_point)
-    u_safe = cbf_qp_control(state, u_nom, obstacle_center, obstacle_radius, safety_margin)
+    u_safe = cbf_qp_control(state, u_nom, obstacle_center, obstacle_axes)
 
     v, omega = u_safe
     x, y, theta = state
@@ -144,10 +143,8 @@ ax.set_xlim(-12, 12)
 ax.set_ylim(-12, 12)
 
 # Obstacle and safety margin
-obs = plt.Circle(obstacle_center, obstacle_radius, color='red', alpha=0.6, label="Obstacle")
-ax.add_patch(obs)
-obs_buffer = plt.Circle(obstacle_center, obstacle_radius + safety_margin, color='red', alpha=0.2, linestyle='--', fill=False)
-ax.add_patch(obs_buffer)
+ellipse = Ellipse(obstacle_center, obstacle_axes[0], obstacle_axes[1], edgecolor="blue", linewidth=2)
+ax.add_patch(ellipse)
 
 # Desired circular path
 circle = plt.Circle((0, 0), R, color='gray', linestyle='--', fill=False, label='Desired Path')
